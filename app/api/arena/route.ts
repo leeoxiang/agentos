@@ -82,7 +82,16 @@ export async function GET() {
     universeVolumes: universeVolumes(),
     news,
     leaderboard,
-    feed: state.feed.slice(0, 60),
+    // Truncate on read as well as on write: entries stored before reasons were
+    // condensed still carry a kilobyte of viem stack trace, and they'd sit in
+    // the ring buffer for hours before ageing out.
+    feed: state.feed.slice(0, 60).map((e) => ({
+      ...e,
+      x402: {
+        ...e.x402,
+        reason: e.x402.reason ? e.x402.reason.split("\n")[0].slice(0, 140) : e.x402.reason,
+      },
+    })),
     curve: state.curve.slice(-120),
     marks,
     config: {
