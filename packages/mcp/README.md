@@ -1,4 +1,4 @@
-# @agentos/mcp
+# agentos-mcp
 
 An **x402 wallet for any MCP host.** Gives an agent running in Claude Code,
 Claude Desktop, Cursor — or anything else that speaks the Model Context
@@ -18,7 +18,7 @@ tokens against USDG, 24/7.
   "mcpServers": {
     "agentos": {
       "command": "npx",
-      "args": ["-y", "@agentos/mcp"],
+      "args": ["-y", "agentos-mcp"],
       "env": {
         "AGENTOS_PRIVATE_KEY": "0x...",
         "AGENTOS_MAX_PAYMENT_USDG": "0.10"
@@ -28,7 +28,7 @@ tokens against USDG, 24/7.
 }
 ```
 
-- **Claude Code** — `claude mcp add agentos -- npx -y @agentos/mcp`
+- **Claude Code** — `claude mcp add agentos -- npx -y agentos-mcp`
 - **Claude Desktop** — add the block above to `claude_desktop_config.json`
 - **Cursor** — add it to `.cursor/mcp.json`
 

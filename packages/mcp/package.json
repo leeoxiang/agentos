@@ -1,17 +1,24 @@
 {
-  "name": "@agentos/mcp",
+  "name": "agentos-mcp",
   "version": "0.1.0",
-  "description": "Model Context Protocol server giving any agent an x402 wallet on Robinhood Chain — quote and trade tokenized stocks, settled in USDG.",
+  "description": "Model Context Protocol server giving any agent an x402 wallet on Robinhood Chain \u2014 quote and trade tokenized stocks, settled in USDG.",
   "license": "MIT",
   "type": "module",
-  "bin": { "agentos-mcp": "./dist/index.js" },
+  "bin": {
+    "agentos-mcp": "./dist/index.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "mcp",
@@ -23,7 +30,9 @@
     "usdg",
     "tokenized-stocks"
   ],
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "viem": "^2.55.5",
@@ -32,5 +41,11 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leeoxiang/agentos.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://agentos-flax.vercel.app"
 }
