@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { PAY_TO, robinhood } from "@/lib/chain";
 import { TOOLS, runTool } from "@/lib/agent/tools";
 import { CATALOG_LIST } from "@/lib/x402/catalog";
+import { guard } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -36,6 +37,12 @@ How to behave:
 type ClientMessage = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: Request) {
+  // Rate limit before anything else. A single request here can fan out to eight
+  // Opus round-trips, so the check has to happen before we read the body, let
+  // alone call the model.
+  const limited = await guard(req, "chat");
+  if (limited) return limited;
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return Response.json(
       { error: "ANTHROPIC_API_KEY is not set — the console agent is offline." },

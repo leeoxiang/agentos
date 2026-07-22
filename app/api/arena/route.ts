@@ -56,6 +56,7 @@ export async function GET() {
     universe: await resolveUniverse(),
     leaderboard,
     feed: state.feed.slice(0, 60),
+    curve: state.curve.slice(-120),
     marks,
     config: {
       // Surfaced so the UI can state exactly which parts are live rather than

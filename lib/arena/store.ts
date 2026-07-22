@@ -82,10 +82,22 @@ export type ArenaState = {
   simPaths: Record<string, number[]>;
   /** Rounds in a row where the live tape produced no price change anywhere. */
   flatRounds: number;
+  /**
+   * Equity per agent, sampled once per round.
+   *
+   * A leaderboard shows who is ahead; the curve shows how they got there, which
+   * is the part that makes a strategy legible. Stored as a flat series rather
+   * than derived from the feed because the feed is capped and would truncate the
+   * history out from under the chart.
+   */
+  curve: EquityPoint[];
 };
+
+export type EquityPoint = { t: number; round: number; equity: Record<string, number> };
 
 export const STARTING_BANKROLL = 1_000;
 const MAX_FEED = 120;
+const MAX_CURVE = 240;
 const KEY = "agentos:arena:v1";
 
 export function freshState(): ArenaState {
@@ -113,6 +125,7 @@ export function freshState(): ArenaState {
     feed: [],
     simPaths: {},
     flatRounds: 0,
+    curve: [],
   };
 }
 
@@ -131,11 +144,13 @@ export async function loadState(): Promise<ArenaState> {
     simPaths: stored.simPaths ?? {},
     flatRounds: stored.flatRounds ?? 0,
     tape: stored.tape ?? "live",
+    curve: (stored.curve ?? []).slice(-MAX_CURVE),
   };
 }
 
 export async function saveState(state: ArenaState): Promise<boolean> {
   state.feed = state.feed.slice(0, MAX_FEED);
+  state.curve = state.curve.slice(-MAX_CURVE);
   return kvSet(KEY, state);
 }
 

@@ -140,6 +140,23 @@ components/
   Cat.tsx               The mascot, as a 16×16 pixel map
 ```
 
+## Operating notes
+
+- **The two model-backed routes are rate limited.** `/api/chat` can fan out to
+  eight Opus round-trips per request and `/api/arena/tick` calls the model once
+  per round; both are publicly reachable, so both are capped per IP through the
+  same Redis (`lib/ratelimit.ts`). Without that, one loop bills the operator
+  without bound.
+- **The arena advances on a cron**, every two minutes, so the competition runs
+  whether or not anyone has the page open. The cron entry point is a `GET` gated
+  on `CRON_SECRET` and **refuses unauthenticated requests** — an endpoint that
+  spends money on every call is closed by default.
+- **To make x402 payments actually settle**, fund a `FACILITATOR_PRIVATE_KEY`
+  address with a little ETH for gas, and the arena agent wallets (listed on
+  `/arena`) with a few USDG each. Receipts then move from `unfunded`/`verified`
+  to `settled` with real transaction hashes on Blockscout. This is a funding
+  step, not a code change.
+
 ## Notes
 
 - **Addresses are EIP-55 checksummed.** viem rejects a bad checksum at call

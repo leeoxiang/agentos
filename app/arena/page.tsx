@@ -6,6 +6,7 @@ import { Cat, paletteFrom } from "@/components/Cat";
 import { AddrLink, Badge, Button, Dot, Empty, Loading, Panel, PanelHeader, TxLink } from "@/components/ui";
 import { ago, compact, pct, qty, usd } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
+import { EquityCurve, type EquityPoint } from "@/components/EquityCurve";
 
 type Standing = {
   id: string;
@@ -57,6 +58,7 @@ type Arena = {
   universe: string[];
   leaderboard: Standing[];
   feed: Entry[];
+  curve: EquityPoint[];
   config: {
     durableState: boolean;
     receiverConfigured: boolean;
@@ -229,6 +231,30 @@ export default function ArenaPage() {
                 />
               ))}
         </div>
+
+        {data && data.curve?.length > 1 ? (
+          <Panel className="mb-4">
+            <PanelHeader
+              title="Equity curves"
+              hint={`Every agent's book value, sampled once per round. Dashed line is the ${usd(data.startingBankroll)} USDG start.`}
+              right={
+                focus ? (
+                  <Badge tone="neutral">
+                    highlighting {board.find((b) => b.id === focus)?.name}
+                  </Badge>
+                ) : null
+              }
+            />
+            <div className="px-3 pb-3 pt-4">
+              <EquityCurve
+                curve={data.curve}
+                agents={board.map((b) => ({ id: b.id, name: b.name, color: b.color }))}
+                starting={data.startingBankroll}
+                highlight={focus}
+              />
+            </div>
+          </Panel>
+        ) : null}
 
         <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
           <Panel>

@@ -17,8 +17,13 @@ const TOKEN_ENV = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_RES
 export const isDurable = () => Boolean(URL_ENV && TOKEN_ENV);
 
 // Survives hot-reload in dev, where module identity is otherwise discarded.
-const g = globalThis as unknown as { __agentosKv?: Map<string, string> };
+const g = globalThis as unknown as {
+  __agentosKv?: Map<string, string>;
+  __agentosCounters?: Map<string, { count: number; expires: number }>;
+};
 const memory: Map<string, string> = (g.__agentosKv ??= new Map());
+const counters: Map<string, { count: number; expires: number }> = (g.__agentosCounters ??=
+  new Map());
 
 export async function kvGet<T>(key: string): Promise<T | null> {
   if (!isDurable()) {
@@ -36,6 +41,51 @@ export async function kvGet<T>(key: string): Promise<T | null> {
   } catch {
     // A KV outage must not take the whole page down — callers treat null as
     // "no state yet" and rebuild from defaults.
+    return null;
+  }
+}
+
+/**
+ * Atomic increment with a TTL on first write.
+ *
+ * Rate limiting cannot be built on get-then-set: two requests that read the same
+ * counter both write `n+1`, and the limit silently doubles under exactly the
+ * concurrency it exists to stop. Redis INCR is atomic, so the counter is correct
+ * no matter how many instances are serving.
+ *
+ * Returns the post-increment count, or null if the store is unreachable — the
+ * caller decides whether to fail open or closed.
+ */
+export async function kvIncr(key: string, ttlSeconds: number): Promise<number | null> {
+  if (!isDurable()) {
+    const now = Date.now();
+    const hit = counters.get(key);
+    if (!hit || hit.expires <= now) {
+      counters.set(key, { count: 1, expires: now + ttlSeconds * 1000 });
+      return 1;
+    }
+    hit.count += 1;
+    return hit.count;
+  }
+
+  try {
+    const res = await fetch(`${URL_ENV}/incr/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${TOKEN_ENV}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { result: number };
+
+    // Only the first request in a window sets the expiry; re-setting it on every
+    // hit would slide the window forward forever and the limit would never reset.
+    if (body.result === 1) {
+      await fetch(`${URL_ENV}/expire/${encodeURIComponent(key)}/${ttlSeconds}`, {
+        headers: { Authorization: `Bearer ${TOKEN_ENV}` },
+        cache: "no-store",
+      }).catch(() => {});
+    }
+    return body.result;
+  } catch {
     return null;
   }
 }

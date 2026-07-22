@@ -494,6 +494,18 @@ export async function tick(origin: string): Promise<TickResult> {
 
   state.feed = [...entries].reverse().concat(state.feed);
   state.lastTickAt = t;
+
+  // Sample every agent's equity once per round. Marks come from this round's
+  // snapshot, so a position in a ticker the round didn't touch falls back to its
+  // cost basis rather than silently dropping out of the curve.
+  state.curve.push({
+    t,
+    round: state.round,
+    equity: Object.fromEntries(
+      Object.values(state.books).map((book) => [book.id, equity(book, marks)])
+    ),
+  });
+
   await saveState(state);
 
   return { round: state.round, t, entries, marks, tape: state.tape, flat: state.flatRounds > 0 };

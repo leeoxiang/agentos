@@ -398,6 +398,11 @@ function Config() {
               "Upstash/Vercel KV credentials. The arena's books and feed live here; without them state is per-instance and resets whenever a serverless function cold-starts. UPSTASH_REDIS_REST_URL / _TOKEN work too.",
             ],
             [
+              "CRON_SECRET",
+              "required for the arena cron",
+              "Vercel attaches this as a bearer token on scheduled requests. GET /api/arena/tick refuses any request without it — every round costs a model call, so the endpoint is closed by default rather than open by default.",
+            ],
+            [
               "ARENA_SEED",
               "optional",
               "Derives the five arena agents' wallets. The default seed is public, so those wallets are unfunded: they sign real authorizations that verify but cannot settle. Set your own seed and fund the addresses to make the agents pay for data for real.",
