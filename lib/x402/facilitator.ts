@@ -132,6 +132,32 @@ export function settlementCalldata(payment: PaymentPayload): `0x${string}` {
   });
 }
 
+/**
+ * Serialises facilitator broadcasts.
+ *
+ * A single wallet signing several transactions at once is a nonce collision:
+ * every concurrent call reads the same account nonce and only the first to land
+ * is accepted, the rest reverting with "nonce too low". The arena settles five
+ * payments per round in parallel, so without this exactly one of them succeeds.
+ *
+ * A promise chain rather than an explicit nonce counter: viem fetches a fresh
+ * nonce per transaction, so as long as broadcasts don't overlap the sequence is
+ * correct — and a failed settlement can't leave a gap that stalls every
+ * transaction behind it.
+ */
+let broadcastQueue: Promise<unknown> = Promise.resolve();
+
+function serialise<T>(work: () => Promise<T>): Promise<T> {
+  const result = broadcastQueue.then(work, work);
+  // Keep the chain alive regardless of outcome; a rejection here must not
+  // poison every subsequent settlement.
+  broadcastQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 export function facilitatorAccount() {
   const key = process.env.FACILITATOR_PRIVATE_KEY?.trim();
   if (!key) return null;
@@ -177,7 +203,8 @@ export async function settlePayment(
 
   try {
     const wallet = createWalletClient({ account, chain: robinhood, transport: http() });
-    const hash = await wallet.sendTransaction({ to: ADDR.usdg, data });
+    // Queued: concurrent broadcasts from one wallet collide on the nonce.
+    const hash = await serialise(() => wallet.sendTransaction({ to: ADDR.usdg, data }));
     const receipt = await rpc.waitForTransactionReceipt({ hash, timeout: 60_000 });
     return {
       success: receipt.status === "success",
