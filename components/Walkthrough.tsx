@@ -193,7 +193,7 @@ export function Walkthrough({
               </Button>
             ) : null}
             {last ? (
-              <Link href="/arena" onClick={onClose}>
+              <Link href="/" onClick={onClose}>
                 <Button size="sm">Watch them trade →</Button>
               </Link>
             ) : (

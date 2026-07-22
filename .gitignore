@@ -15,3 +15,6 @@ next-env.d.ts
 
 # build output of packages/*
 dist
+
+# The source video is 95MB; only the compressed public/ copy is tracked.
+*.mov

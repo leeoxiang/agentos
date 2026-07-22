@@ -9,6 +9,7 @@ import { ago, compact, pct, qty, usd } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import { EquityCurve, type EquityPoint } from "@/components/EquityCurve";
 import { PlayPanel, PlayerBoard } from "@/components/PlayPanel";
+import { VideoPanel } from "@/components/VideoPanel";
 import { useAccount } from "wagmi";
 
 type Standing = {
@@ -218,6 +219,8 @@ export default function ArenaPage() {
               ))}
         </div>
 
+        <VideoPanel />
+
         {data?.news?.items?.length ? (
           <Panel className="mb-4">
             <PanelHeader
@@ -331,7 +334,7 @@ export default function ArenaPage() {
                 paying for data and taking sides.
               </Empty>
             ) : (
-              <div className="max-h-[620px] overflow-y-auto">
+              <div className="max-h-[620px] overflow-y-auto overflow-x-hidden">
                 {feed.map((e) => (
                   <FeedRow key={e.id} e={e} agent={board.find((b) => b.id === e.agentId)} />
                 ))}
@@ -537,7 +540,7 @@ function FeedRow({ e, agent }: { e: Entry; agent?: Standing }) {
           : "down";
 
   return (
-    <div className="animate-rise flex gap-3 border-b border-ink-800 px-4 py-3 last:border-0">
+    <div className="animate-rise flex min-w-0 gap-3 overflow-hidden border-b border-ink-800 px-4 py-3 last:border-0">
       <div className="shrink-0 pt-0.5">
         <Cat size={26} palette={paletteFrom(color)} />
       </div>
@@ -581,12 +584,14 @@ function FeedRow({ e, agent }: { e: Entry; agent?: Standing }) {
           ) : null}
         </div>
 
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 [overflow-wrap:anywhere]">
           <Badge tone={paidTone as "up" | "flame" | "gold" | "down"}>
             x402 {e.x402.priceUsdg} · {e.x402.status}
           </Badge>
           {e.x402.reason ? (
-            <span className="font-mono text-[10px] text-ash-500">{e.x402.reason}</span>
+            <span className="min-w-0 max-w-full break-words font-mono text-[10px] leading-snug text-ash-500">
+              {e.x402.reason}
+            </span>
           ) : null}
           <span className="font-mono text-[10px] text-ash-500">
             nonce {e.x402.nonce.slice(0, 10)}…

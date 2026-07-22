@@ -160,6 +160,22 @@ function serialise<T>(work: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/**
+ * Condense a broadcast failure into something displayable.
+ *
+ * viem errors carry the full request — calldata, arguments, docs links — which
+ * runs to about a kilobyte. Storing that verbatim per feed entry bloats the KV
+ * blob and, rendered, blows the layout apart horizontally. The first line
+ * carries the actual cause; the rest is context for a stack trace nobody reads
+ * on a leaderboard.
+ */
+function shortReason(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const first = raw.split("\n").find((l) => l.trim()) ?? "broadcast failed";
+  const cleaned = first.trim();
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137)}…` : cleaned;
+}
+
 export function facilitatorAccount() {
   const key = process.env.FACILITATOR_PRIVATE_KEY?.trim();
   if (!key) return null;
@@ -227,7 +243,7 @@ export async function settlePayment(
       transaction: null,
       network: X402_NETWORK,
       payer: verification.payer,
-      errorReason: e instanceof Error ? e.message : "broadcast_failed",
+      errorReason: shortReason(e),
       selfSubmit: { to: ADDR.usdg, data },
     };
   }
