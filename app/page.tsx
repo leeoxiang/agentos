@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { PageBody, PageHeader } from "@/components/PageHeader";
 import { Cat, paletteFrom } from "@/components/Cat";
@@ -96,46 +96,17 @@ type Arena = {
   };
 };
 
-const TICK_MS = 25_000;
-
 export default function ArenaPage() {
   const { address } = useAccount();
   const { data, loading, refresh } = useApi<Arena>("/api/arena", 20_000);
-  const [running, setRunning] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  async function runRound() {
-    if (busy) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/arena/tick", { method: "POST" });
-      const body = await res.json();
-      if (!res.ok && !body.busy) throw new Error(body.error ?? "round failed");
-      refresh();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "round failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!running) {
-      if (timer.current) clearInterval(timer.current);
-      timer.current = null;
-      return;
-    }
-    runRound();
-    timer.current = setInterval(runRound, TICK_MS);
-    return () => {
-      if (timer.current) clearInterval(timer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running]);
+  // Rounds are driven server-side by the cron in vercel.json, so the arena runs
+  // around the clock whether or not anyone has the page open. The client-side
+  // ticker that used to live here was never reachable — its flag started false
+  // and only the (now removed) reset button ever touched the setter — and had it
+  // run, every open tab would have been POSTing a model-calling endpoint on a
+  // timer. The page is a viewer; it polls and renders, it does not drive.
 
   const board = data?.leaderboard ?? [];
   const feed = (data?.feed ?? []).filter((e) => !focus || e.agentId === focus);
@@ -167,13 +138,7 @@ export default function ArenaPage() {
       </PageHeader>
 
       <PageBody>
-        {err ? (
-          <div className="mb-4 rounded-[2px] border border-rose-500/40 bg-rose-500/8 px-3.5 py-2.5 text-[12px] text-rose-500">
-            {err}
-          </div>
-        ) : null}
-
-                {/* Status strip — states plainly which parts are live. */}
+        {/* Status strip — states plainly which parts are live. */}
         {data ? (
           <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[2px] border border-ink-700 bg-ink-900 px-4 py-2.5">
             <span className="flex items-center gap-2">
@@ -407,26 +372,6 @@ export default function ArenaPage() {
               </Panel>
             ) : null}
 
-            <Panel>
-              <PanelHeader title="Reset" />
-              <div className="p-4">
-                <p className="text-[11px] leading-snug text-ash-400">
-                  Returns every agent to {usd(data?.startingBankroll ?? 1000)} USDG and clears the feed.
-                </p>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  className="mt-3 w-full"
-                  onClick={async () => {
-                    setRunning(false);
-                    await fetch("/api/arena", { method: "DELETE" });
-                    refresh();
-                  }}
-                >
-                  Reset the arena
-                </Button>
-              </div>
-            </Panel>
           </div>
         </div>
       </PageBody>

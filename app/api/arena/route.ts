@@ -7,6 +7,7 @@ import { loadPlayers, playerEquity } from "@/lib/arena/players";
 import { liveTrading } from "@/lib/arena/engine";
 import { agentAddresses, usingDefaultSeed } from "@/lib/arena/wallets";
 import { isDurable } from "@/lib/kv";
+import { isCron } from "@/lib/ratelimit";
 import { facilitatorAccount } from "@/lib/x402/facilitator";
 import { PAY_TO } from "@/lib/chain";
 
@@ -110,7 +111,20 @@ export async function GET() {
   });
 }
 
-export async function DELETE() {
+/**
+ * Wipe the arena back to starting bankrolls.
+ *
+ * Operator-only. This existed as a one-click button while the arena was a local
+ * simulation worth restarting between changes; now that rounds settle real x402
+ * payments on-chain, the books are a record of money that actually moved and
+ * clearing them destroys it. The button is gone, and the endpoint is no longer
+ * reachable without the secret — it was unauthenticated, so anyone who found it
+ * could have reset the leaderboard with a single request.
+ */
+export async function DELETE(req: Request) {
+  if (!isCron(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const state = await resetState();
   return NextResponse.json({ reset: true, round: state.round });
 }
