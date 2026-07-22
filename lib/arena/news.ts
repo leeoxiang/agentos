@@ -100,9 +100,13 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
     })
     .join(", ");
 
-  // The model has no clock. Without today's date, "recent" is anchored to its
-  // training data and it will confidently return months-old news as current.
-  const today = new Date().toISOString().slice(0, 10);
+  // The model has no clock, and left to itself it searches without any recency
+  // intent — measured runs came back with articles 15 days old that it presented
+  // as current. Handing it today's and yesterday's dates, and telling it to put
+  // them in the query, moved that to under 48 hours.
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const yesterday = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
 
   try {
     const client = new Anthropic();
@@ -153,7 +157,8 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
       // model's room to pad a real result with invented specifics.
       .filter((i) => /^https?:\/\/\S+\.\S+/.test(i.url ?? ""))
       .filter((i) => hoursOld(i.publishedAt) <= MAX_AGE_HOURS)
-      .filter((i) => symbols.includes(i.symbol));
+      .filter((i) => symbols.includes(i.symbol))
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 
     const snapshot: NewsSnapshot = { fetchedAt: Date.now(), items, verified: true };
     await kvSet(KEY, snapshot);
