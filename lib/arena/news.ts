@@ -117,21 +117,28 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
       output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
       tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
       system:
-        `Today is ${today}. You surface genuinely recent market news for trading agents.\n\n` +
-        "You MUST use web search for every ticker. Never answer from memory — your training " +
-        "data is months stale and will be wrong.\n\n" +
-        "For each ticker return the single most recent, most material article you actually found:\n" +
+        `Today is ${today}. You surface breaking market news for trading agents that act on it ` +
+        "within minutes. Recency is the entire point — an article from last week is worthless here.\n\n" +
+        "You MUST use web search for every ticker. Never answer from memory; your training data is " +
+        "months stale and will be wrong.\n\n" +
+        "Search strategy, for every ticker:\n" +
+        `- Put the date in the query, e.g. "<TICKER> stock news ${today}" and "<TICKER> stock ${yesterday}".\n` +
+        `- Prefer results published today (${today}) or yesterday (${yesterday}).\n` +
+        "- If the best result is over a week old, search again with a tighter query before settling.\n\n" +
+        "Return the single most recent material article you actually found:\n" +
         "- url: the real article URL from your search results. Never construct or guess a URL.\n" +
-        "- publishedAt: the article's own publish date, ISO format. Never today's date by default.\n" +
+        "- publishedAt: the article's own publish date, ISO format. Never default to today.\n" +
         "- headline: the article's actual headline, not a paraphrase.\n" +
         "- sentiment: -1 (clearly bearish) to +1 (clearly bullish), 0 when mixed or immaterial. " +
         "Be calibrated — most days are near zero.\n" +
         "- summary: one short sentence a trader could act on.\n\n" +
-        "If search returns nothing recent for a ticker, omit that ticker entirely. Do not invent " +
-        "an entry, and do not pad a real article with details you did not read. An omitted ticker " +
-        "is correct; a fabricated one is not.",
+        "Omit a ticker entirely rather than returning something stale or invented. An omitted " +
+        "ticker is correct; a fabricated one is not.",
       messages: [
-        { role: "user", content: `Search for the latest news on each of: ${named}.` },
+        {
+          role: "user",
+          content: `Breaking news from the last 48 hours for: ${named}. Today is ${today}.`,
+        },
       ],
     });
 
