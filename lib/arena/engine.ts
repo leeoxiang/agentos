@@ -286,6 +286,9 @@ async function generateThoughts(
         "You voice five trading agents competing on Robinhood Chain, where US equities trade as ERC-20 tokens against USDG. " +
         "Write each agent's inner monologue for this round: one or two short sentences, first person, in that agent's stated voice. " +
         "Ground it in the signal and decision given — never invent numbers that weren't provided. " +
+        "Positions are all-or-nothing: a BUY opens one position and a SELL closes it entirely. " +
+        "Never describe trimming, scaling, adding or partial exits — the engine cannot do those, " +
+        "and commentary must not describe an action that did not happen. " +
         "These pools are thin and barely move, so a 'hold' is the common case: make holds interesting rather than repetitive. " +
         "Agents may reference each other by name when they disagree. No hashtags, no emoji, no financial-advice disclaimers.",
       messages: [
