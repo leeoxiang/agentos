@@ -1,6 +1,5 @@
 import { kvGet, kvSet } from "../kv";
 import { AGENTS } from "./agents";
-import type { TapeMode } from "./tape";
 
 export type AgentBook = {
   id: string;
@@ -67,20 +66,15 @@ export type FeedEntry = {
   notional: number;
   readout: Record<string, number>;
   x402: X402Receipt;
-  /** Which tape produced this price. Simulated rows must stay labelled. */
-  tape: TapeMode;
 };
 
 export type ArenaState = {
   round: number;
   startedAt: number;
   lastTickAt: number | null;
-  tape: TapeMode;
   books: Record<string, AgentBook>;
   feed: FeedEntry[];
-  /** Per-symbol simulated price path, persisted so the walk stays continuous. */
-  simPaths: Record<string, number[]>;
-  /** Rounds in a row where the live tape produced no price change anywhere. */
+  /** Rounds in a row where the market produced no price change anywhere. */
   flatRounds: number;
   /**
    * Equity per agent, sampled once per round.
@@ -105,7 +99,6 @@ export function freshState(): ArenaState {
     round: 0,
     startedAt: Date.now(),
     lastTickAt: null,
-    tape: "live",
     books: Object.fromEntries(
       AGENTS.map((a) => [
         a.id,
@@ -123,7 +116,6 @@ export function freshState(): ArenaState {
       ])
     ),
     feed: [],
-    simPaths: {},
     flatRounds: 0,
     curve: [],
   };
@@ -141,9 +133,7 @@ export async function loadState(): Promise<ArenaState> {
     ...stored,
     books: { ...base.books, ...stored.books },
     feed: (stored.feed ?? []).slice(0, MAX_FEED),
-    simPaths: stored.simPaths ?? {},
     flatRounds: stored.flatRounds ?? 0,
-    tape: stored.tape ?? "live",
     curve: (stored.curve ?? []).slice(-MAX_CURVE),
   };
 }

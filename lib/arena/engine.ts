@@ -15,7 +15,6 @@ import { buildRequirements } from "../x402/server";
 import { facilitatorAccount, settlePayment, verifyPayment } from "../x402/facilitator";
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, X402_VERSION, type PaymentPayload } from "../x402/types";
 import { AGENTS, type Decision, type MarketView } from "./agents";
-import { SIM_PATH_LEN, seedSimPath, simCandles, stepSim, type TapeMode } from "./tape";
 import { agentAccount } from "./wallets";
 import { getNews, headlineFor, sentimentFor, type NewsSnapshot } from "./news";
 import {
@@ -407,27 +406,9 @@ export type TickResult = {
   t: number;
   entries: FeedEntry[];
   marks: Record<string, number>;
-  tape: TapeMode;
-  /** True when the live oracle showed no movement anywhere this round. */
+  /** True when no pool moved at all this round. */
   flat: boolean;
 };
-
-/**
- * Overlay the simulated tape on a live snapshot.
- *
- * Depth, fee tier and the pool address stay exactly as read from chain — only
- * the price path is generated, anchored to the real spot so it can't drift
- * somewhere the market never was.
- */
-function applySimTape(state: ArenaState, live: Snapshot[]): Snapshot[] {
-  return live.map((s) => {
-    const path = state.simPaths[s.symbol] ?? seedSimPath(s.symbol, s.price);
-    const next = stepSim(s.symbol, state.round, path[path.length - 1], s.price);
-    const updated = [...path, next].slice(-SIM_PATH_LEN);
-    state.simPaths[s.symbol] = updated;
-    return { ...s, price: next, candles: simCandles(updated) };
-  });
-}
 
 /**
  * One competitive round.
@@ -449,16 +430,18 @@ export async function tick(origin: string): Promise<TickResult> {
   if (!live.length) {
     state.lastTickAt = Date.now();
     await saveState(state);
-    return { round: state.round, t: state.lastTickAt, entries: [], marks: {}, tape: state.tape, flat: false };
+    return { round: state.round, t: state.lastTickAt, entries: [], marks: {}, flat: false };
   }
 
   // Detect a dormant chain so the UI can say so instead of looking broken.
   // These pools frequently go long stretches with no swaps at all, in which
   // case the live tape is genuinely flat and every honest strategy holds.
-  const anyMovement = live.some((s) => volatilityPct(s.candles) > 0 || Math.abs(changePct(s.candles)) > 0);
+  const anyMovement = live.some(
+    (s) => volatilityPct(s.candles) > 0 || Math.abs(changePct(s.candles)) > 0
+  );
   state.flatRounds = anyMovement ? 0 : state.flatRounds + 1;
 
-  const snaps = state.tape === "sim" ? applySimTape(state, live) : live;
+  const snaps = live;
 
   const bySymbol = Object.fromEntries(snaps.map((s) => [s.symbol, s]));
   const marks: Record<string, number> = Object.fromEntries(snaps.map((s) => [s.symbol, s.price]));
@@ -597,7 +580,6 @@ export async function tick(origin: string): Promise<TickResult> {
     notional: s.fill.notional,
     readout: s.decision.readout,
     x402: s.paid,
-    tape: state.tape,
   }));
 
   state.feed = [...entries].reverse().concat(state.feed);
@@ -616,7 +598,7 @@ export async function tick(origin: string): Promise<TickResult> {
 
   await saveState(state);
 
-  return { round: state.round, t, entries, marks, tape: state.tape, flat: state.flatRounds > 0 };
+  return { round: state.round, t, entries, marks, flat: state.flatRounds > 0 };
 }
 
 /** Mark every open position to live pool prices for the leaderboard. */

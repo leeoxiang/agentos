@@ -197,9 +197,8 @@ function Endpoints() {
             ["GET /api/vault?account=0x…", "steakUSDG vault state and your position."],
             ["POST /api/order", "Order routing for the site's own swap UI. The metered twin is trade.buildOrder."],
             ["GET /api/trader · POST /api/trader/tick", "Trading agent state and one strategy pass."],
-            ["GET /api/arena", "Arena leaderboard, feed, tape mode and configuration."],
-            ["POST /api/arena", "Switch the tape between live and simulated. Flattens open positions first."],
-            ["POST /api/arena/tick", "Run one competitive round: five agents pay, decide and trade."],
+            ["GET /api/arena", "Arena leaderboard, equity curves, news and configuration."],
+                        ["POST /api/arena/tick", "Run one competitive round: five agents pay, decide and trade."],
             ["/embed", "Embeddable live leaderboard. Drop it in an iframe: <iframe src=\"https://agentos-flax.vercel.app/embed\" width=\"440\" height=\"260\" frameborder=\"0\"></iframe>"],
           ].map(([path, note]) => (
             <div key={path} className="px-4 py-3">

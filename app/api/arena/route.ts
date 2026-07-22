@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { AGENTS } from "@/lib/arena/agents";
 import { equity, markPositions, resolveUniverse, universeVolumes } from "@/lib/arena/engine";
-import { loadState, resetState, saveState, STARTING_BANKROLL } from "@/lib/arena/store";
+import { loadState, resetState, STARTING_BANKROLL } from "@/lib/arena/store";
 import { getNews } from "@/lib/arena/news";
 import { agentAddresses, usingDefaultSeed } from "@/lib/arena/wallets";
 import { isDurable } from "@/lib/kv";
@@ -54,7 +54,6 @@ export async function GET() {
     round: state.round,
     startedAt: state.startedAt,
     lastTickAt: state.lastTickAt,
-    tape: state.tape,
     flatRounds: state.flatRounds,
     startingBankroll: STARTING_BANKROLL,
     universe,
@@ -74,39 +73,6 @@ export async function GET() {
       defaultSeed: usingDefaultSeed(),
     },
   });
-}
-
-/** Switch which tape the arena trades against. */
-export async function POST(req: Request) {
-  let body: { tape?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
-  }
-  if (body.tape !== "live" && body.tape !== "sim")
-    return NextResponse.json({ error: "tape must be 'live' or 'sim'" }, { status: 400 });
-
-  const state = await loadState();
-  if (state.tape === body.tape) return NextResponse.json({ tape: state.tape });
-
-  // Flatten every open position at its own cost basis before switching.
-  // A position entered on one tape and marked on the other produces a P&L that
-  // reflects the mode change rather than any decision the agent made — the
-  // first live round after a switch would show phantom stop-losses across the
-  // whole field. Returning the basis to cash keeps the books honest.
-  let flattened = 0;
-  for (const book of Object.values(state.books)) {
-    if (!book.position) continue;
-    book.cashUsdg += book.position.qty * book.position.avgCost;
-    book.position = null;
-    flattened += 1;
-  }
-
-  state.tape = body.tape;
-  state.flatRounds = 0;
-  await saveState(state);
-  return NextResponse.json({ tape: state.tape, flattened });
 }
 
 export async function DELETE() {

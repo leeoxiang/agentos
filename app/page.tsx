@@ -45,7 +45,6 @@ type Entry = {
   qty: number;
   notional: number;
   readout: Record<string, number>;
-  tape: "live" | "sim";
   x402: { priceUsdg: number; status: string; reason?: string; nonce: string; payer: string; txHash?: string };
 };
 
@@ -53,7 +52,6 @@ type Arena = {
   round: number;
   startedAt: number;
   lastTickAt: number | null;
-  tape: "live" | "sim";
   flatRounds: number;
   startingBankroll: number;
   universe: string[];
@@ -108,15 +106,6 @@ export default function ArenaPage() {
     }
   }
 
-  async function setTape(tape: "live" | "sim") {
-    await fetch("/api/arena", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tape }),
-    });
-    refresh();
-  }
-
   useEffect(() => {
     if (!running) {
       if (timer.current) clearInterval(timer.current);
@@ -167,39 +156,7 @@ export default function ArenaPage() {
           </div>
         ) : null}
 
-        {/* The chain is frequently dormant. Say so outright rather than
-            letting a flat leaderboard read as a broken page. */}
-        {data && data.tape === "live" && data.flatRounds >= 2 ? (
-          <div className="mb-4 rounded-[2px] border border-gold-500/40 bg-gold-500/8 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <Badge tone="gold">market dormant</Badge>
-              <span className="text-[12.5px] text-ash-200">
-                No swaps have moved these pools for {data.flatRounds} rounds — the live tape is
-                genuinely flat, so the agents correctly do nothing.
-              </span>
-              <Button size="sm" variant="outline" className="ml-auto" onClick={() => setTape("sim")}>
-                Switch to simulated tape
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {data && data.tape === "sim" ? (
-          <div className="mb-4 rounded-[2px] border border-flame-500/40 bg-flame-500/8 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <Badge tone="flame">simulated tape</Badge>
-              <span className="text-[12.5px] text-ash-200">
-                Prices are generated around the real on-chain spot. Depth, fee tiers, routing and
-                every x402 payment stay real — only the price path is synthetic.
-              </span>
-              <Button size="sm" variant="outline" className="ml-auto" onClick={() => setTape("live")}>
-                Back to live tape
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Status strip — states plainly which parts are live. */}
+                {/* Status strip — states plainly which parts are live. */}
         {data ? (
           <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[2px] border border-ink-700 bg-ink-900 px-4 py-2.5">
             <span className="flex items-center gap-2">
@@ -210,9 +167,6 @@ export default function ArenaPage() {
             <Meta label="Last" value={ago(data.lastTickAt)} />
             <Meta label="Spread" value={`${usd(spread)} USDG`} />
             <div className="ml-auto flex flex-wrap gap-1.5">
-              <Badge tone={data.tape === "live" ? "up" : "flame"}>
-                {data.tape === "live" ? "live tape" : "sim tape"}
-              </Badge>
               <Badge tone={data.config.receiverConfigured ? "up" : "gold"}>
                 x402 {data.config.receiverConfigured ? "enforced" : "unconfigured"}
               </Badge>
@@ -371,9 +325,9 @@ export default function ArenaPage() {
               <PanelHeader title="How a round runs" />
               <ol className="divide-y divide-ink-800">
                 {[
-                  ["Rotate", "One ticker is chosen from the universe so all five read the same tape."],
+                  ["Screen", "The universe is ranked by real traded volume — only tickers with actual flow."],
                   ["Pay", "Each agent signs an EIP-3009 authorization over USDG for the 0.001 quote. Real signature, real on-chain nonce and balance checks."],
-                  ["Decide", "Each strategy reads a different signal out of the pool's TWAP oracle — trend, range, breakout, depth, volatility."],
+                  ["Decide", "Each strategy reads a different signal out of real swap-event prices — trend, range, breakout, depth, volatility — plus the same headlines."],
                   ["Fill", "Paper book, real price: the pool's own fee tier is charged against every fill."],
                   ["Talk", "Commentary is written after the fact. The strategies decide; the model only narrates."],
                 ].map(([t, b], i) => (
@@ -610,9 +564,6 @@ function FeedRow({ e, agent }: { e: Entry; agent?: Standing }) {
           <span className="font-mono text-[10px] text-ash-500">
             nonce {e.x402.nonce.slice(0, 10)}…
           </span>
-          {e.tape === "sim" ? (
-            <span className="font-mono text-[10px] text-flame-500">sim price</span>
-          ) : null}
           {e.x402.txHash ? <TxLink hash={e.x402.txHash} /> : null}
         </div>
       </div>

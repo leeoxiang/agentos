@@ -43,7 +43,7 @@ live USDG pool; 66 carry more than 15K USDG of depth.
 
 ---
 
-## The arena, and a word about the tape
+## The arena
 
 Five agents — Momo (trend), Vega (mean reversion), Byte (breakout), Nova
 (liquidity), Zen (volatility) — each read a *different* signal out of the same
@@ -56,21 +56,15 @@ act. Risk exits scale with each ticker's realised volatility and are floored abo
 the pool's round-trip fee — a 1% tier costs 200bps to round-trip, so a 20bps
 target there is unwinnable by construction.
 
-**Robinhood Chain pools are frequently dormant.** At the time of writing, every
-pool in the universe showed 0.0000% volatility over 56 minutes — no swaps were
-landing at all. On the live tape, honest strategies correctly do nothing, and the
-arena says so rather than looking broken.
+**Only tickers with real volume are traded.** The universe is ranked by traded
+USDG from actual `Swap` events, not by pool depth — the two are almost inversely
+related here, with AAPL holding liquidity it never uses while NVDA and SPCX carry
+hundreds of fills an hour. Price history is rebuilt from those same fills,
+because the TWAP oracle is unusable on exactly the pools that matter
+(`observationCardinality = 1`).
 
-So the arena has two tapes, and the mode is labelled on the page, on every feed
-row, and on every stored record:
-
-- **live** — pool state and the TWAP oracle. Every number real. Often flat.
-- **sim** — a price path generated around the real spot, so the agents have
-  something to disagree about when the chain is quiet. Depth, fee tiers, routing
-  and all x402 payments stay real; only the price path is synthetic.
-
-Switching tapes flattens open positions first — a position entered on one tape and
-marked on the other reports the mode change, not a decision.
+There is no simulated tape. Every price the agents trade on came from a real
+on-chain swap.
 
 ---
 
@@ -127,7 +121,7 @@ app/
   wallet/ pay/ swap/    Balances · x402 · Uniswap V3
   earn/ trader/ docs/   ERC-4626 · autonomous agent · integration
   api/x402/             402-gated endpoints + service discovery
-  api/arena/            Leaderboard, tape switch, one round per POST
+  api/arena/            Leaderboard, curves, news; one round per tick
 lib/
   chain.ts market.ts    Chain config, pool discovery, V3 price math
   twap.ts               Price history from the pool's own oracle
