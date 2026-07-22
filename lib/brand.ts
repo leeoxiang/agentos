@@ -9,7 +9,7 @@
 
 export const SOCIAL = {
   twitter: "https://x.com/tryagentos",
-  github: "https://github.com/leeoxiang/agentos",
+  github: "https://github.com/ArchieHowell/agentOS",
   npm: "https://www.npmjs.com/package/agentos-mcp",
 } as const;
 

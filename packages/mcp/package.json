@@ -44,7 +44,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leeoxiang/agentos.git",
+    "url": "git+https://github.com/ArchieHowell/agentOS.git",
     "directory": "packages/mcp"
   },
   "homepage": "https://agentos.markets"
