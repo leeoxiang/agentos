@@ -8,6 +8,8 @@ import { AddrLink, Badge, Button, Dot, Empty, Loading, Panel, PanelHeader, TxLin
 import { ago, compact, pct, qty, usd } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import { EquityCurve, type EquityPoint } from "@/components/EquityCurve";
+import { PlayPanel, PlayerBoard } from "@/components/PlayPanel";
+import { useAccount } from "wagmi";
 
 type Standing = {
   id: string;
@@ -46,6 +48,8 @@ type Entry = {
   notional: number;
   readout: Record<string, number>;
   x402: { priceUsdg: number; status: string; reason?: string; nonce: string; payer: string; txHash?: string };
+  txHash?: string;
+  thin?: boolean;
 };
 
 type Arena = {
@@ -58,6 +62,16 @@ type Arena = {
   leaderboard: Standing[];
   feed: Entry[];
   curve: EquityPoint[];
+  players: Array<{
+    address: string;
+    equity: number;
+    pnl: number;
+    pnlPct: number;
+    position: { symbol: string; qty: number; avgCost: number } | null;
+    trades: number;
+    wins: number;
+    losses: number;
+  }>;
   news: {
     fetchedAt: number;
     verified: boolean;
@@ -77,12 +91,14 @@ type Arena = {
     facilitatorArmed: boolean;
     commentaryEnabled: boolean;
     defaultSeed: boolean;
+    liveTrading: boolean;
   };
 };
 
 const TICK_MS = 25_000;
 
 export default function ArenaPage() {
+  const { address } = useAccount();
   const { data, loading, refresh } = useApi<Arena>("/api/arena", 20_000);
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -169,6 +185,9 @@ export default function ArenaPage() {
             <div className="ml-auto flex flex-wrap gap-1.5">
               <Badge tone={data.config.receiverConfigured ? "up" : "gold"}>
                 x402 {data.config.receiverConfigured ? "enforced" : "unconfigured"}
+              </Badge>
+              <Badge tone={data.config.liveTrading ? "up" : "neutral"}>
+                {data.config.liveTrading ? "trading on-chain" : "paper book"}
               </Badge>
               <Badge tone={data.config.facilitatorArmed ? "up" : "neutral"}>
                 {data.config.facilitatorArmed ? "settling" : "verify-only"}
@@ -321,6 +340,14 @@ export default function ArenaPage() {
           </Panel>
 
           <div className="space-y-4">
+            <PlayPanel
+              players={data?.players ?? []}
+              universe={data?.universe ?? []}
+              onChanged={refresh}
+            />
+
+            <PlayerBoard players={data?.players ?? []} you={address} />
+
             <Panel>
               <PanelHeader title="How a round runs" />
               <ol className="divide-y divide-ink-800">
@@ -565,6 +592,13 @@ function FeedRow({ e, agent }: { e: Entry; agent?: Standing }) {
             nonce {e.x402.nonce.slice(0, 10)}…
           </span>
           {e.x402.txHash ? <TxLink hash={e.x402.txHash} /> : null}
+          {e.thin ? <Badge tone="gold">thin</Badge> : null}
+          {e.txHash ? (
+            <span className="flex items-center gap-1">
+              <Badge tone="up">on-chain</Badge>
+              <TxLink hash={e.txHash} />
+            </span>
+          ) : null}
         </div>
       </div>
     </div>

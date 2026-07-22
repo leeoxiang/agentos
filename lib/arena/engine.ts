@@ -1,20 +1,23 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { PAY_TO, USDG_DECIMALS, USDG_DOMAIN } from "../chain";
+import { createWalletClient, http } from "viem";
+import { PAY_TO, USDG_DECIMALS, USDG_DOMAIN, robinhood } from "../chain";
 import { findPool, loadMarket, poolDepthUsdg, priceFromSqrt, type Pool } from "../market";
 import {
-  MIN_VOLUME_USDG,
+  FLOOR_VOLUME_USDG,
+  THIN_VOLUME_USDG,
   PRICE_LOOKBACK_BLOCKS,
   VOLUME_LOOKBACK_BLOCKS,
   scanSwaps,
   toCandles,
 } from "../volume";
 import { changePct, volatilityPct, type Candle } from "../twap";
-import { resolveStock } from "../order";
+import { buildOrder, resolveStock } from "../order";
 import { CATALOG } from "../x402/catalog";
 import { buildRequirements } from "../x402/server";
 import { facilitatorAccount, settlePayment, verifyPayment } from "../x402/facilitator";
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, X402_VERSION, type PaymentPayload } from "../x402/types";
 import { AGENTS, type Decision, type MarketView } from "./agents";
+import { rpc } from "../rpc";
 import { agentAccount } from "./wallets";
 import { getNews, headlineFor, sentimentFor, type NewsSnapshot } from "./news";
 import {
@@ -64,7 +67,7 @@ async function rankByVolume(): Promise<{ symbols: string[]; volumes: Record<stri
       const act = pool ? activity.get(pool.address.toLowerCase()) : undefined;
       return { symbol: row.symbol, volumeUsdg: act?.volumeUsdg ?? 0, swaps: act?.swaps ?? 0 };
     })
-    .filter((s) => s.volumeUsdg >= MIN_VOLUME_USDG)
+    .filter((s) => s.volumeUsdg >= FLOOR_VOLUME_USDG)
     .sort((a, b) => b.volumeUsdg - a.volumeUsdg)
     .slice(0, UNIVERSE_SIZE);
 
@@ -88,7 +91,13 @@ export function universeVolumes(): Record<string, number> {
   return g.__arenaUniverse?.volumes ?? {};
 }
 
-type Snapshot = MarketView & { fee: number; volumeUsdg: number; swaps: number };
+type Snapshot = MarketView & {
+  fee: number;
+  volumeUsdg: number;
+  swaps: number;
+  /** True when the ticker trades, but thinly. Shown rather than hidden. */
+  thin: boolean;
+};
 
 /**
  * Pull one round's market data: spot, depth, and a price series rebuilt from
@@ -124,6 +133,7 @@ async function snapshotMarket(symbols: string[], news: NewsSnapshot): Promise<Sn
       fee: pool.fee,
       volumeUsdg: act?.volumeUsdg ?? 0,
       swaps: act?.swaps ?? 0,
+      thin: (act?.volumeUsdg ?? 0) < THIN_VOLUME_USDG,
       sentiment: sentimentFor(news, symbol),
       headline: headlineFor(news, symbol)?.headline ?? null,
     } satisfies Snapshot;
@@ -274,6 +284,68 @@ function applyNews(
         : decision.rationale,
     readout: { ...decision.readout, sentiment: snap.sentiment, agreement },
   };
+}
+
+/**
+ * Whether agents place real on-chain swaps.
+ *
+ * Off by default and deliberately awkward to enable: this is the switch between
+ * a paper ledger and one that spends the agents' own USDG. Every fill becomes a
+ * real transaction, so it stays behind an explicit flag plus a hard notional cap
+ * that is checked per trade regardless of what a strategy asked for.
+ */
+export const liveTrading = () => /^(1|true|yes)$/i.test(process.env.LIVE_TRADING?.trim() ?? "");
+
+const MAX_LIVE_TRADE_USDG = Number(process.env.MAX_LIVE_TRADE_USDG ?? 5);
+
+/**
+ * Execute a decision on-chain from the agent's own wallet.
+ *
+ * Returns the transaction hash, or null if it could not be placed — in which
+ * case the caller falls back to recording the fill on the paper book rather than
+ * dropping the round. Routing goes through the same `buildOrder` the paid x402
+ * endpoint serves, so a live fill and a paper fill are priced identically.
+ */
+async function executeOnChain(
+  agentId: string,
+  decision: Decision,
+  snap: Snapshot
+): Promise<{ txHash: string; qty: number; notional: number } | null> {
+  try {
+    const account = agentAccount(agentId);
+    const notional = Math.min(decision.conviction * MAX_LIVE_TRADE_USDG, MAX_LIVE_TRADE_USDG);
+    if (notional < 0.5) return null;
+
+    const amount = decision.action === "buy" ? notional : notional / snap.price;
+
+    const order = await buildOrder({
+      symbol: snap.symbol,
+      side: decision.action === "buy" ? "buy" : "sell",
+      amount,
+      trader: account.address,
+      slippageBps: 300,
+    });
+
+    const wallet = createWalletClient({ account, chain: robinhood, transport: http() });
+
+    if (order.approval) {
+      const approveHash = await wallet.sendTransaction({
+        to: order.approval.to,
+        data: order.approval.data,
+      });
+      await rpc.waitForTransactionReceipt({ hash: approveHash, timeout: 90_000 });
+    }
+
+    const hash = await wallet.sendTransaction({ to: order.to, data: order.data });
+    const receipt = await rpc.waitForTransactionReceipt({ hash, timeout: 90_000 });
+    if (receipt.status !== "success") return null;
+
+    return { txHash: hash, qty: order.expectedOut, notional };
+  } catch {
+    // An unfunded wallet, a reverted swap, a stalled RPC — all mean "no live
+    // fill", and the round continues on paper rather than failing.
+    return null;
+  }
 }
 
 /** Apply a decision to the agent's paper book, priced off the real pool. */
@@ -539,8 +611,21 @@ export async function tick(origin: string): Promise<TickResult> {
         };
       }
 
+      // When live trading is armed the swap is placed for real; the paper book
+      // is still updated so the leaderboard stays consistent across both modes.
+      const onChain = liveTrading()
+        ? await executeOnChain(def.id, best.decision, best.snap)
+        : null;
+
       const fill = execute(book, best.decision, best.snap, def.aggression);
-      return { def, paid, snap: best.snap, decision: best.decision, fill };
+      return {
+        def,
+        paid,
+        snap: best.snap,
+        decision: best.decision,
+        fill,
+        txHash: onChain?.txHash,
+      };
     })
   );
 
@@ -580,6 +665,8 @@ export async function tick(origin: string): Promise<TickResult> {
     notional: s.fill.notional,
     readout: s.decision.readout,
     x402: s.paid,
+    txHash: s.txHash,
+    thin: s.snap.thin,
   }));
 
   state.feed = [...entries].reverse().concat(state.feed);

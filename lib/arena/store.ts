@@ -66,6 +66,10 @@ export type FeedEntry = {
   notional: number;
   readout: Record<string, number>;
   x402: X402Receipt;
+  /** Set when the fill was placed on-chain rather than only on the paper book. */
+  txHash?: string;
+  /** True when the ticker trades thinly — surfaced rather than hidden. */
+  thin?: boolean;
 };
 
 export type ArenaState = {

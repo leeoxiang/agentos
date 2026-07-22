@@ -10,12 +10,25 @@ import { kvIncr } from "./kv";
  * bound. This is a cost control first and an abuse control second.
  */
 
-export type Limit = { limit: number; windowSeconds: number };
+export type Limit = {
+  limit: number;
+  windowSeconds: number;
+  /**
+   * What to do when the counter store is unreachable.
+   *
+   * A route that costs money per call must fail *closed* — an outage should
+   * degrade the feature, not silently remove the spend ceiling and leave the
+   * bill uncapped.
+   */
+  failClosed: boolean;
+};
 
 /** Per-route budgets. Generous enough for a human, useless for a scraper. */
 export const LIMITS = {
-  chat: { limit: 12, windowSeconds: 300 },
-  arenaTick: { limit: 30, windowSeconds: 300 },
+  chat: { limit: 12, windowSeconds: 300, failClosed: true },
+  arenaTick: { limit: 30, windowSeconds: 300, failClosed: true },
+  // Player trades cost nothing to serve, so this stays open on a KV outage.
+  play: { limit: 60, windowSeconds: 300, failClosed: false },
 } as const satisfies Record<string, Limit>;
 
 /**
@@ -37,6 +50,8 @@ export type RateResult = {
   remaining: number;
   limit: number;
   resetSeconds: number;
+  /** True when the decision was made without a working counter. */
+  degraded?: boolean;
 };
 
 export async function rateLimit(req: Request, route: keyof typeof LIMITS): Promise<RateResult> {
@@ -48,10 +63,17 @@ export async function rateLimit(req: Request, route: keyof typeof LIMITS): Promi
 
   const count = await kvIncr(key, windowSeconds);
 
-  // A KV outage must not take the site down, but it also must not silently
-  // remove the spend ceiling — see `guard`, which fails closed on the routes
-  // that cost money.
-  if (count === null) return { ok: true, remaining: limit, limit, resetSeconds: windowSeconds };
+  // Counter unavailable. For a metered route that means refusing rather than
+  // waving traffic through: an unmetered LLM endpoint is a worse failure than a
+  // temporarily unavailable one.
+  if (count === null)
+    return {
+      ok: !LIMITS[route].failClosed,
+      remaining: 0,
+      limit,
+      resetSeconds: 30,
+      degraded: true,
+    };
 
   const elapsed = Math.floor(Date.now() / 1000) % windowSeconds;
   return {
@@ -75,8 +97,11 @@ export async function guard(
 
   return NextResponse.json(
     {
-      error: `Rate limit exceeded. This endpoint costs the operator money per call, so it is capped at ${result.limit} requests per ${LIMITS[route].windowSeconds / 60} minutes.`,
+      error: result.degraded
+        ? "Rate limiting is temporarily unavailable, so this metered endpoint is closed rather than left uncapped. Try again shortly."
+        : `Rate limit exceeded. This endpoint costs the operator money per call, so it is capped at ${result.limit} requests per ${LIMITS[route].windowSeconds / 60} minutes.`,
       retryAfterSeconds: result.resetSeconds,
+      degraded: result.degraded ?? false,
     },
     {
       status: 429,

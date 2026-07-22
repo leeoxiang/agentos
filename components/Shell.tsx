@@ -10,6 +10,7 @@ import { Cat } from "./Cat";
 import { Button, Dot } from "./ui";
 import { Walkthrough, useWalkthrough } from "./Walkthrough";
 import { Ticker } from "./Ticker";
+import { HealthBadge } from "./HealthBadge";
 import { SocialRow, TokenCard } from "./Social";
 
 const NAV = [
@@ -108,6 +109,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <div className="mt-5 px-3">
             <div className="label mb-2">Network</div>
             <NetworkCard />
+          </div>
+
+          <div className="mt-3">
+            <div className="label mb-2 px-3">System</div>
+            <HealthBadge />
           </div>
         </div>
 

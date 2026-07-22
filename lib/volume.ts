@@ -156,3 +156,14 @@ export function toCandles(activity: PoolActivity, count = 30): Candle[] {
  * agent needs a counterparty, not a balance sheet.
  */
 export const MIN_VOLUME_USDG = 1_000;
+
+/**
+ * Below this a ticker is tradable but thin, and is labelled as such rather than
+ * hidden. Excluding everything quiet leaves the arena with a two-name universe
+ * that collapses entirely if one goes quiet; showing the liquidity honestly is
+ * better than showing nothing.
+ */
+export const THIN_VOLUME_USDG = 25_000;
+
+/** Floor for inclusion at all — below this there is genuinely no counterparty. */
+export const FLOOR_VOLUME_USDG = 200;

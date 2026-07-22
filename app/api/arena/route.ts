@@ -3,6 +3,8 @@ import { AGENTS } from "@/lib/arena/agents";
 import { equity, markPositions, resolveUniverse, universeVolumes } from "@/lib/arena/engine";
 import { loadState, resetState, STARTING_BANKROLL } from "@/lib/arena/store";
 import { getNews } from "@/lib/arena/news";
+import { loadPlayers, playerEquity } from "@/lib/arena/players";
+import { liveTrading } from "@/lib/arena/engine";
 import { agentAddresses, usingDefaultSeed } from "@/lib/arena/wallets";
 import { isDurable } from "@/lib/kv";
 import { facilitatorAccount } from "@/lib/x402/facilitator";
@@ -50,8 +52,28 @@ export async function GET() {
     };
   }).sort((a, b) => b.equity - a.equity);
 
+  // Humans are ranked on exactly the same marks as the agents.
+  const playerBook = await loadPlayers();
+  const players = Object.values(playerBook)
+    .map((p) => {
+      const eq = playerEquity(p, marks);
+      return {
+        address: p.address,
+        equity: eq,
+        pnl: eq - STARTING_BANKROLL,
+        pnlPct: ((eq - STARTING_BANKROLL) / STARTING_BANKROLL) * 100,
+        position: p.position,
+        trades: p.trades,
+        wins: p.wins,
+        losses: p.losses,
+        joinedAt: p.joinedAt,
+      };
+    })
+    .sort((a, b) => b.equity - a.equity);
+
   return NextResponse.json({
     round: state.round,
+    players,
     startedAt: state.startedAt,
     lastTickAt: state.lastTickAt,
     flatRounds: state.flatRounds,
@@ -71,6 +93,7 @@ export async function GET() {
       facilitatorArmed: !!facilitatorAccount(),
       commentaryEnabled: !!process.env.ANTHROPIC_API_KEY,
       defaultSeed: usingDefaultSeed(),
+      liveTrading: liveTrading(),
     },
   });
 }
