@@ -133,17 +133,19 @@ export function settlementCalldata(payment: PaymentPayload): `0x${string}` {
 }
 
 /**
- * Serialises facilitator broadcasts.
+ * Serialises facilitator broadcasts *including confirmation*.
  *
- * A single wallet signing several transactions at once is a nonce collision:
+ * A single wallet sending several transactions at once is a nonce collision:
  * every concurrent call reads the same account nonce and only the first to land
  * is accepted, the rest reverting with "nonce too low". The arena settles five
- * payments per round in parallel, so without this exactly one of them succeeds.
+ * payments per round in parallel, so without this exactly one succeeds.
  *
- * A promise chain rather than an explicit nonce counter: viem fetches a fresh
- * nonce per transaction, so as long as broadcasts don't overlap the sequence is
- * correct — and a failed settlement can't leave a gap that stalls every
- * transaction behind it.
+ * Serialising only the `sendTransaction` call is not enough, and that was the
+ * first attempt at this: the second transaction asks for its nonce before the
+ * first has been *mined*, so the chain still reports the old count and both use
+ * the same one. The lock therefore has to span broadcast and receipt, which is
+ * why this is slower than it looks like it should be. At ~0.1s blocks that is
+ * a second or two per round — a fair price for every payment landing.
  */
 let broadcastQueue: Promise<unknown> = Promise.resolve();
 
@@ -203,9 +205,15 @@ export async function settlePayment(
 
   try {
     const wallet = createWalletClient({ account, chain: robinhood, transport: http() });
-    // Queued: concurrent broadcasts from one wallet collide on the nonce.
-    const hash = await serialise(() => wallet.sendTransaction({ to: ADDR.usdg, data }));
-    const receipt = await rpc.waitForTransactionReceipt({ hash, timeout: 60_000 });
+
+    // Broadcast *and* confirm inside the lock — releasing after the broadcast
+    // lets the next transaction read a nonce the chain hasn't advanced yet.
+    const { hash, receipt } = await serialise(async () => {
+      const sent = await wallet.sendTransaction({ to: ADDR.usdg, data });
+      const mined = await rpc.waitForTransactionReceipt({ hash: sent, timeout: 60_000 });
+      return { hash: sent, receipt: mined };
+    });
+
     return {
       success: receipt.status === "success",
       transaction: hash,
