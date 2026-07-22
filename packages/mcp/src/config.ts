@@ -48,7 +48,7 @@ export function loadConfig(): Config {
   }
 
   return {
-    baseUrl: (process.env.AGENTOS_URL?.trim() || "https://agentos-flax.vercel.app").replace(/\/+$/, ""),
+    baseUrl: (process.env.AGENTOS_URL?.trim() || "https://agentos.markets").replace(/\/+$/, ""),
     account,
     maxPaymentUsdg: num("AGENTOS_MAX_PAYMENT_USDG", 0.1),
     allowSubmit: /^(1|true|yes)$/i.test(process.env.AGENTOS_ALLOW_SUBMIT?.trim() ?? ""),

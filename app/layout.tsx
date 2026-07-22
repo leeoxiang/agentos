@@ -8,7 +8,7 @@ const siteUrl =
   process.env.NEXT_PUBLIC_SITE_URL ??
   (process.env.VERCEL_PROJECT_PRODUCTION_URL
     ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : "https://agentos-flax.vercel.app");
+    : "https://agentos.markets");
 
 export const metadata: Metadata = {
   // Without this, Next emits a relative OG image URL and X/Discord silently

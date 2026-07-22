@@ -199,7 +199,7 @@ function Endpoints() {
             ["GET /api/trader · POST /api/trader/tick", "Trading agent state and one strategy pass."],
             ["GET /api/arena", "Arena leaderboard, equity curves, news and configuration."],
                         ["POST /api/arena/tick", "Run one competitive round: five agents pay, decide and trade."],
-            ["/embed", "Embeddable live leaderboard. Drop it in an iframe: <iframe src=\"https://agentos-flax.vercel.app/embed\" width=\"440\" height=\"260\" frameborder=\"0\"></iframe>"],
+            ["/embed", "Embeddable live leaderboard. Drop it in an iframe: <iframe src=\"https://agentos.markets/embed\" width=\"440\" height=\"260\" frameborder=\"0\"></iframe>"],
           ].map(([path, note]) => (
             <div key={path} className="px-4 py-3">
               <div className="font-mono text-[11.5px] text-ash-100">{path}</div>

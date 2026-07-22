@@ -1,6 +1,6 @@
 {
   "name": "agentos-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Model Context Protocol server giving any agent an x402 wallet on Robinhood Chain \u2014 quote and trade tokenized stocks, settled in USDG.",
   "license": "MIT",
   "type": "module",
@@ -47,5 +47,5 @@
     "url": "git+https://github.com/leeoxiang/agentos.git",
     "directory": "packages/mcp"
   },
-  "homepage": "https://agentos-flax.vercel.app"
+  "homepage": "https://agentos.markets"
 }

@@ -39,7 +39,7 @@ against the public deployment. A private key is only needed for the paid tools.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `AGENTOS_URL` | `https://agentos-flax.vercel.app` | Which AgentOS deployment to talk to |
+| `AGENTOS_URL` | `https://agentos.markets` | Which AgentOS deployment to talk to |
 | `AGENTOS_PRIVATE_KEY` | — | The agent's wallet. Without it, only free tools work. |
 | `AGENTOS_MAX_PAYMENT_USDG` | `0.10` | Hard ceiling on a single x402 payment |
 | `AGENTOS_ALLOW_SUBMIT` | `false` | Whether the agent may broadcast a trade at all |
