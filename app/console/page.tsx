@@ -128,11 +128,25 @@ export default function Console() {
           if (!line.trim()) continue;
           const ev = JSON.parse(line) as
             | { type: "text"; text: string }
+            | { type: "text_start" }
+            | { type: "delta"; text: string }
             | ({ type: "tool" } & ToolTrace)
             | { type: "error"; error: string }
             | { type: "done" };
 
-          if (ev.type === "text") {
+          // `delta` is the streaming path and carries essentially all model
+          // output; `text` is only used for the tool-round-limit notice. Handling
+          // just the latter meant every token was parsed and discarded, so the
+          // console sat on "thinking" through a completely successful response.
+          if (ev.type === "delta") {
+            patch((t) => ({ ...t, msg: { ...t.msg, content: t.msg.content + ev.text } }));
+          } else if (ev.type === "text_start") {
+            // Paragraph boundary between blocks, but never a leading blank.
+            patch((t) => ({
+              ...t,
+              msg: { ...t.msg, content: t.msg.content ? `${t.msg.content}\n\n` : "" },
+            }));
+          } else if (ev.type === "text") {
             patch((t) => ({
               ...t,
               msg: { ...t.msg, content: t.msg.content ? `${t.msg.content}\n\n${ev.text}` : ev.text },
@@ -162,7 +176,24 @@ export default function Console() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "The agent failed to respond.");
     } finally {
-      setTurns((prev) => prev.map((t, i) => (i === cursor ? { ...t, streaming: false } : t)));
+      setTurns((prev) =>
+        prev.map((t, i) =>
+          i === cursor
+            ? {
+                ...t,
+                streaming: false,
+                // A finished turn with no text and no tool trace is a dead end.
+                // Say so rather than leaving an empty bubble that reads as the
+                // interface being broken — which is exactly how the dropped
+                // delta frames presented.
+                msg:
+                  t.msg.content.trim() || t.tools.length
+                    ? { ...t.msg, content: t.msg.content.trimEnd() }
+                    : { ...t.msg, content: "_No response — the model returned nothing._" },
+              }
+            : t
+        )
+      );
       setBusy(false);
       textarea.current?.focus();
     }

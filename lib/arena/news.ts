@@ -38,10 +38,30 @@ export type NewsSnapshot = {
   items: TickerNews[];
   /** False when search didn't run — the UI says so instead of implying freshness. */
   verified: boolean;
+  /**
+   * Tickers this snapshot was *fetched for*, which is not the same as the
+   * tickers it returned — see the coverage note on `isFresh`.
+   */
+  askedFor?: string[];
+  /**
+   * Set when a fetch ran and produced nothing usable. Without it a barren
+   * result is indistinguishable from a cold cache, and every caller retries
+   * the search immediately.
+   */
+  attemptedAt?: number;
 };
 
 const KEY = "agentos:arena:news:v2";
 const TTL_MS = 10 * 60_000;
+/**
+ * Hard floor between paid searches, independent of cache state.
+ *
+ * The TTL alone is not a spend limit: a barren or failed fetch leaves nothing
+ * fresh behind, so every subsequent caller sees a stale cache and pays for
+ * another search. This floor is the backstop that makes the worst case
+ * "one search per interval" rather than "one search per request".
+ */
+const MIN_FETCH_INTERVAL_MS = 5 * 60_000;
 /** Older than this and it isn't news, it's history. */
 const MAX_AGE_HOURS = 72;
 
@@ -72,6 +92,39 @@ const SCHEMA = {
 
 const EMPTY: NewsSnapshot = { fetchedAt: 0, items: [], verified: false };
 
+/**
+ * Is this snapshot good enough to serve without paying for another search?
+ *
+ * Deliberately time-based and *not* coverage-based. The prompt instructs the
+ * model to omit any ticker it can't verify — "an omitted ticker is correct" —
+ * and the URL and freshness filters below drop more. So a healthy snapshot
+ * routinely covers only some of the universe. The previous check required
+ * every requested symbol to be present, which a correct response could almost
+ * never satisfy: the cache was written every time and read almost never, and
+ * each miss cost an Opus call with six web searches.
+ *
+ * Coverage is still consulted, but only to let a genuinely new ticker refresh
+ * early — never to invalidate an otherwise fresh snapshot.
+ */
+function isFresh(snap: NewsSnapshot | null, symbols: string[]): boolean {
+  if (!snap?.verified) return false;
+  if (Date.now() - snap.fetchedAt >= TTL_MS) return false;
+  // A symbol we've never even asked about is worth an early refresh; one we
+  // asked about and got nothing for is a legitimate omission, not a miss.
+  const asked = new Set(snap.askedFor ?? snap.items.map((i) => i.symbol));
+  return symbols.every((s) => asked.has(s));
+}
+
+/**
+ * Read-only view of the cache.
+ *
+ * Read paths must use this. `getNews` can spend money, and calling it from a
+ * polled GET endpoint turns every open browser tab into a recurring bill.
+ */
+export async function peekNews(): Promise<NewsSnapshot> {
+  return (await kvGet<NewsSnapshot>(KEY)) ?? EMPTY;
+}
+
 function hoursOld(iso: string): number {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return Number.POSITIVE_INFINITY;
@@ -86,12 +139,44 @@ function hoursOld(iso: string): number {
  */
 export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
   const cached = await kvGet<NewsSnapshot>(KEY);
-  if (cached?.verified && Date.now() - cached.fetchedAt < TTL_MS) {
-    const covered = new Set(cached.items.map((i) => i.symbol));
-    if (symbols.every((s) => covered.has(s))) return cached;
-  }
+  if (cached && isFresh(cached, symbols)) return cached;
 
   if (!process.env.ANTHROPIC_API_KEY || !symbols.length) return cached ?? EMPTY;
+
+  // Spend floor. Applies even when the cache is stale, empty, or was written by
+  // a fetch that found nothing — those are exactly the states that otherwise
+  // let every caller pay for its own search.
+  const lastAttempt = Math.max(cached?.attemptedAt ?? 0, cached?.fetchedAt ?? 0);
+  if (Date.now() - lastAttempt < MIN_FETCH_INTERVAL_MS) return cached ?? EMPTY;
+
+  // Within a single warm instance, collapse concurrent misses onto one request
+  // so a burst of traffic can't fan out into a burst of searches.
+  if (inFlight) return inFlight;
+  inFlight = fetchNews(symbols, cached).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+/** In-flight de-duplication for {@link getNews}. */
+let inFlight: Promise<NewsSnapshot> | null = null;
+
+async function fetchNews(
+  symbols: string[],
+  cached: NewsSnapshot | null
+): Promise<NewsSnapshot> {
+  // Stamp the attempt up front. If the search returns nothing usable, or throws,
+  // this is what stops the next caller from immediately paying to try again.
+  const attemptedAt = Date.now();
+  const barren = (): NewsSnapshot => ({
+    ...(cached ?? EMPTY),
+    attemptedAt,
+    askedFor: symbols,
+  });
+  const remember = async (snap: NewsSnapshot) => {
+    await kvSet(KEY, snap);
+    return snap;
+  };
 
   const named = symbols
     .map((s) => {
@@ -146,7 +231,7 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
     const searched = response.content.some(
       (b) => b.type === "server_tool_use" || b.type === "web_search_tool_result"
     );
-    if (!searched) return cached ?? EMPTY;
+    if (!searched) return remember(barren());
 
     const text = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
@@ -167,11 +252,28 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
       .filter((i) => symbols.includes(i.symbol))
       .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 
-    const snapshot: NewsSnapshot = { fetchedAt: Date.now(), items, verified: true };
-    await kvSet(KEY, snapshot);
-    return snapshot;
+    // Merge rather than replace: a ticker legitimately omitted this round keeps
+    // its previous headline until that headline ages out, instead of the feed
+    // flickering empty every time the model declines to verify one.
+    const merged = [
+      ...items,
+      ...(cached?.items ?? []).filter(
+        (old) =>
+          !items.some((fresh) => fresh.symbol === old.symbol) &&
+          symbols.includes(old.symbol) &&
+          hoursOld(old.publishedAt) <= MAX_AGE_HOURS
+      ),
+    ].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+
+    return remember({
+      fetchedAt: Date.now(),
+      items: merged,
+      verified: true,
+      askedFor: symbols,
+      attemptedAt,
+    });
   } catch {
-    return cached ?? EMPTY;
+    return remember(barren());
   }
 }
 

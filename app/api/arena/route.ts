@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { AGENTS } from "@/lib/arena/agents";
 import { equity, markPositions, resolveUniverse, universeVolumes } from "@/lib/arena/engine";
 import { loadState, resetState, STARTING_BANKROLL } from "@/lib/arena/store";
-import { getNews } from "@/lib/arena/news";
+import { peekNews } from "@/lib/arena/news";
 import { loadPlayers, playerEquity } from "@/lib/arena/players";
 import { liveTrading } from "@/lib/arena/engine";
 import { agentAddresses, usingDefaultSeed } from "@/lib/arena/wallets";
@@ -18,8 +18,11 @@ export async function GET() {
   const marks = await markPositions(state);
   const addresses = agentAddresses();
   const universe = await resolveUniverse();
-  // Cached hard, so this is a read of whatever the last round fetched.
-  const news = await getNews(universe);
+  // Strictly a cache read. This endpoint is polled by every open tab every 20s,
+  // so it must never be able to trigger a paid search — only the tick may do
+  // that. It previously called getNews() on the assumption the cache would
+  // absorb it, and the cache didn't.
+  const news = await peekNews();
 
   const leaderboard = AGENTS.map((def) => {
     const book = state.books[def.id];

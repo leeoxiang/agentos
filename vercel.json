@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/arena/tick",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     }
   ],
   "redirects": [

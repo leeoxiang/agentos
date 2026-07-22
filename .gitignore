@@ -1,7 +1,10 @@
 node_modules
 .next
 out
-build
+# Anchored: a bare "build" matches any directory at any depth, which silently
+# excluded app/build/ — the page existed locally, was never committed, and 404'd
+# in production while working fine in dev.
+/build
 .env
 .env.local
 .env*.local
