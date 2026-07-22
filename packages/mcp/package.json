@@ -44,8 +44,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ArchieHowell/agentOS.git",
+    "url": "git+https://github.com/ArchieHowell/AgentOS.git",
     "directory": "packages/mcp"
   },
-  "homepage": "https://agentos.markets"
+  "homepage": "https://agentos.markets",
+  "bugs": {
+    "url": "https://github.com/ArchieHowell/AgentOS/issues"
+  }
 }
