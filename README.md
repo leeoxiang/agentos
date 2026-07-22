@@ -24,6 +24,8 @@ mocks, no fixtures.
 | **Earn yield** | Steakhouse USDG, `0xBeEf…09dd` — a real ERC-4626 vault holding ~170M USDG. Deposit/redeem are plain 4626 calls, so an agent can park cash between trades. |
 | **Buy stocks** | 94 verified Robinhood stock tokens. `trade.buildOrder` sells *routing*, not custody: pay 0.02 USDG over x402, get back submit-ready calldata. |
 | **Trading agent** | Dual-SMA momentum with stop-loss, take-profit, exposure cap and a price-impact guard. Dry-run by default; arms with a signer and broadcasts real swaps. |
+| **Agent arena** | Five agents with incompatible theses competing on one 1,000 USDG book each. Every round, each signs a real EIP-3009 authorization to pay for its market data before it may act. |
+| **Price history** | Read from each pool's Uniswap V3 TWAP oracle (`observe()`), not accumulated in a database — so a cold serverless invocation has full history immediately. |
 | **Console** | Claude Opus 4.8 with tool use over live chain state. Reads anything; proposes trades; signs nothing. |
 
 ## Verified on-chain
@@ -36,7 +38,39 @@ SwapRouter02  0xCaf681a66D020601342297493863E78C959E5cb2
 ```
 
 Live sample from `/api/market`: NVDA **205.14** USDG (8.0M depth, 0.3% tier),
-AAPL **326.78**, TSLA **377.95**, MSFT **401.43**.
+AAPL **326.78**, TSLA **377.95**, MSFT **401.43**. 73 of 94 stock tokens have a
+live USDG pool; 66 carry more than 15K USDG of depth.
+
+---
+
+## The arena, and a word about the tape
+
+Five agents — Momo (trend), Vega (mean reversion), Byte (breakout), Nova
+(liquidity), Zen (volatility) — each read a *different* signal out of the same
+market, so they genuinely disagree and take opposite sides.
+
+Each round: a ticker universe is ranked by real depth, every agent signs an
+EIP-3009 authorization for the 0.001 USDG quote fee, the signature is verified
+against USDG's on-chain `authorizationState`, and only then does the agent get to
+act. Risk exits scale with each ticker's realised volatility and are floored above
+the pool's round-trip fee — a 1% tier costs 200bps to round-trip, so a 20bps
+target there is unwinnable by construction.
+
+**Robinhood Chain pools are frequently dormant.** At the time of writing, every
+pool in the universe showed 0.0000% volatility over 56 minutes — no swaps were
+landing at all. On the live tape, honest strategies correctly do nothing, and the
+arena says so rather than looking broken.
+
+So the arena has two tapes, and the mode is labelled on the page, on every feed
+row, and on every stored record:
+
+- **live** — pool state and the TWAP oracle. Every number real. Often flat.
+- **sim** — a price path generated around the real spot, so the agents have
+  something to disagree about when the chain is quiet. Depth, fee tiers, routing
+  and all x402 payments stay real; only the price path is synthetic.
+
+Switching tapes flattens open positions first — a position entered on one tape and
+marked on the other reports the mode change, not a decision.
 
 ---
 
@@ -89,16 +123,21 @@ before it can agree to a price.
 ```
 app/
   page.tsx              Console — the LLM-style agent surface
+  arena/                Five agents competing, live
   wallet/ pay/ swap/    Balances · x402 · Uniswap V3
   earn/ trader/ docs/   ERC-4626 · autonomous agent · integration
   api/x402/             402-gated endpoints + service discovery
+  api/arena/            Leaderboard, tape switch, one round per POST
 lib/
   chain.ts market.ts    Chain config, pool discovery, V3 price math
+  twap.ts               Price history from the pool's own oracle
   order.ts              Routing + calldata construction
+  kv.ts                 Durable KV with an in-memory fallback
   x402/                 types · server (paywall) · facilitator · client
   trader/               store · strategy · engine
+  arena/                agents · wallets · tape · engine · store
 components/
-  Octopus.tsx           The mascot, as a 16×16 pixel map
+  Cat.tsx               The mascot, as a 16×16 pixel map
 ```
 
 ## Notes
@@ -108,6 +147,12 @@ components/
   hand-written checksums cost a debugging cycle here.
 - **API validation is checksum-lenient** (`lib/addr.ts`). Agents routinely send
   lowercase addresses; strict validation would 400 a perfectly valid request.
-- **Trader state is process-local** by design — the strategy needs only the last
-  few hundred samples, so the agent runs with zero external infrastructure. Swap
-  `lib/trader/store.ts` for Redis if you deploy across instances.
+- **Arena state persists to Upstash/Vercel KV** when `KV_REST_API_URL` and
+  `KV_REST_API_TOKEN` are set, and falls back to an in-process Map otherwise. The
+  UI shows which mode is active rather than letting you assume persistence you
+  don't have.
+- **Arena wallets are derived from `ARENA_SEED`.** The default seed is public, so
+  those five wallets are unfunded: they sign authorizations that verify on-chain
+  but stop at `insufficient_funds`. That state is reported as `unfunded` and kept
+  distinct from `rejected` — a forged or replayed authorization still blocks the
+  agent outright.

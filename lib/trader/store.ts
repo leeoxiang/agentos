@@ -98,6 +98,19 @@ export function record(symbol: string, price: number, t = Date.now()) {
   if (h.length > MAX_SAMPLES) h.splice(0, h.length - MAX_SAMPLES);
 }
 
+/**
+ * Replace a ticker's history with the pool oracle's own series.
+ *
+ * Sampling one price per tick meant a cold start had no history at all — on
+ * serverless, where every invocation may be a cold start, the strategy could
+ * never leave "warming up". The oracle already stores the history, so read it
+ * instead of accumulating our own.
+ */
+export function seedHistory(symbol: string, samples: Sample[]) {
+  if (!samples.length) return;
+  store.history[symbol] = samples.slice(-MAX_SAMPLES);
+}
+
 export function pushLog(entry: Omit<RunEntry, "id" | "t"> & { t?: number }) {
   const e: RunEntry = {
     ...entry,

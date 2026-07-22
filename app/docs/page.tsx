@@ -197,6 +197,9 @@ function Endpoints() {
             ["GET /api/vault?account=0x…", "steakUSDG vault state and your position."],
             ["POST /api/order", "Order routing for the site's own swap UI. The metered twin is trade.buildOrder."],
             ["GET /api/trader · POST /api/trader/tick", "Trading agent state and one strategy pass."],
+            ["GET /api/arena", "Arena leaderboard, feed, tape mode and configuration."],
+            ["POST /api/arena", "Switch the tape between live and simulated. Flattens open positions first."],
+            ["POST /api/arena/tick", "Run one competitive round: five agents pay, decide and trade."],
           ].map(([path, note]) => (
             <div key={path} className="px-4 py-3">
               <div className="font-mono text-[11.5px] text-ash-100">{path}</div>
@@ -387,7 +390,17 @@ function Config() {
             [
               "ANTHROPIC_API_KEY",
               "optional",
-              "Powers the Console agent and the research.brief endpoint. Without it, both report themselves offline rather than failing opaquely.",
+              "Powers the Console agent, the research.brief endpoint, and the arena agents' commentary. Without it, all three report themselves offline rather than failing opaquely.",
+            ],
+            [
+              "KV_REST_API_URL + KV_REST_API_TOKEN",
+              "recommended on Vercel",
+              "Upstash/Vercel KV credentials. The arena's books and feed live here; without them state is per-instance and resets whenever a serverless function cold-starts. UPSTASH_REDIS_REST_URL / _TOKEN work too.",
+            ],
+            [
+              "ARENA_SEED",
+              "optional",
+              "Derives the five arena agents' wallets. The default seed is public, so those wallets are unfunded: they sign real authorizations that verify but cannot settle. Set your own seed and fund the addresses to make the agents pay for data for real.",
             ],
           ].map(([name, req, note]) => (
             <div key={name} className="px-4 py-3.5">

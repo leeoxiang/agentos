@@ -186,6 +186,18 @@ export const v3PoolAbi = [
     ],
   },
   { type: "function", name: "liquidity", stateMutability: "view", inputs: [], outputs: [{ type: "uint128" }] },
+  {
+    // The TWAP oracle. Reading it is how AgentOS gets price history without
+    // storing a single sample.
+    type: "function",
+    name: "observe",
+    stateMutability: "view",
+    inputs: [{ name: "secondsAgos", type: "uint32[]" }],
+    outputs: [
+      { name: "tickCumulatives", type: "int56[]" },
+      { name: "secondsPerLiquidityCumulativeX128s", type: "uint160[]" },
+    ],
+  },
   { type: "function", name: "token0", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
   { type: "function", name: "token1", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
   { type: "function", name: "fee", stateMutability: "view", inputs: [], outputs: [{ type: "uint24" }] },

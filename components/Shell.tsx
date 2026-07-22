@@ -6,11 +6,12 @@ import { useEffect, useState } from "react";
 import { useAccount, useBalance, useChainId, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { ADDR, robinhood } from "@/lib/chain";
 import { short, usd } from "@/lib/format";
-import { Octopus } from "./Octopus";
+import { Cat } from "./Cat";
 import { Button, Dot } from "./ui";
 
 const NAV = [
   { href: "/", label: "Console", glyph: "▸", hint: "Talk to the agent" },
+  { href: "/arena", label: "Arena", glyph: "◆", hint: "5 agents competing" },
   { href: "/wallet", label: "Wallet", glyph: "◧", hint: "Balances & positions" },
   { href: "/pay", label: "x402 Pay", glyph: "◈", hint: "Metered payments" },
   { href: "/swap", label: "Swap", glyph: "⇄", hint: "USDG ↔ stocks" },
@@ -45,7 +46,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           href="/"
           className="flex items-center gap-2.5 border-b border-ink-700 px-4 py-4 hover:bg-ink-850"
         >
-          <Octopus size={30} title="AgentOS" />
+          <Cat size={30} title="AgentOS" />
           <div className="leading-none">
             <div className="text-[15px] font-semibold tracking-tight text-ash-100">
               Agent<span className="text-flame-500">OS</span>
@@ -105,7 +106,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           >
             ☰
           </button>
-          <Octopus size={22} />
+          <Cat size={22} />
           <span className="text-[14px] font-semibold">
             Agent<span className="text-flame-500">OS</span>
           </span>

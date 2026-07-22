@@ -3,9 +3,10 @@ import { privateKeyToAccount } from "viem/accounts";
 import { STOCK_DECIMALS, USDG_DECIMALS, robinhood } from "../chain";
 import { buildOrder } from "../order";
 import { findPool, priceFromSqrt } from "../market";
+import { priceHistory } from "../twap";
 import { rpc } from "../rpc";
 import { STOCKS } from "../stocks";
-import { applyFill, pushLog, record, store, type RunEntry } from "./store";
+import { applyFill, pushLog, record, seedHistory, store, type RunEntry } from "./store";
 import { evaluate, type Signal } from "./strategy";
 
 /** The agent's own signer. Absent key => the trader can only ever propose. */
@@ -49,6 +50,9 @@ export async function tick(): Promise<TickResult> {
         continue;
       }
       const price = priceFromSqrt(pool.sqrtPriceX96, pool.usdgIsToken0);
+      // Seed from the pool's TWAP oracle so the strategy has real history on the
+      // very first tick, then append live spot on top of it.
+      seedHistory(symbol, await priceHistory(pool));
       record(symbol, price);
 
       const signal = evaluate(symbol, policy);

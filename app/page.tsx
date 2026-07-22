@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
-import { OctopusHero, Octopus } from "@/components/Octopus";
+import { CatHero, Cat } from "@/components/Cat";
 import { Badge, Button, Dot } from "@/components/ui";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -146,7 +146,7 @@ export default function Console() {
               ) : (
                 <div className="flex gap-3">
                   <div className="mt-0.5 shrink-0">
-                    <Octopus size={24} muted={!turn.msg.content && turn.tools.length === 0} />
+                    <Cat size={24} muted={!turn.msg.content && turn.tools.length === 0} />
                   </div>
                   <div className="min-w-0 flex-1">
                     {turn.tools.map((tool, j) => (
@@ -214,7 +214,7 @@ export default function Console() {
 function Splash({ onPick }: { onPick: (p: string) => void }) {
   return (
     <div className="mx-auto w-full max-w-[720px] px-5 pb-2 pt-14 text-center">
-      <OctopusHero size={84} />
+      <CatHero size={84} />
       <h1 className="mt-6 text-[30px] font-semibold leading-tight tracking-tight text-ash-100">
         The wallet your agents<br />
         <span className="text-flame-500">actually operate.</span>
