@@ -25,9 +25,21 @@ const SUGGESTIONS = [
   { label: "Check the trader", prompt: "What is the autonomous trading agent doing right now?" },
 ];
 
+/**
+ * Conversations live in localStorage, not on the server.
+ *
+ * The transcript is the user's, it can mention their wallet, and none of it is
+ * needed server-side once a turn completes — so it never leaves the browser.
+ * Tool traces are dropped on save: they can be large, and a stale trace read
+ * back after a refresh would show results that are no longer true.
+ */
+const HISTORY_KEY = "agentos:console:v1";
+const MAX_STORED_TURNS = 40;
+
 export default function Console() {
   const { address } = useAccount();
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [restored, setRestored] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +49,33 @@ export default function Console() {
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy]);
+
+  // Read once on mount — localStorage doesn't exist during SSR, and touching it
+  // while rendering would break hydration.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as Msg[];
+        if (Array.isArray(saved) && saved.length)
+          setTurns(saved.map((msg) => ({ msg, tools: [] })));
+      }
+    } catch {
+      // Corrupt or unavailable storage — start clean rather than fail to load.
+    }
+    setRestored(true);
+  }, []);
+
+  // Persist completed turns only, so a half-streamed reply is never restored as
+  // if the agent had finished saying it.
+  useEffect(() => {
+    if (!restored || busy) return;
+    try {
+      const msgs = turns.map((t) => t.msg).filter((m) => m.content.trim());
+      if (msgs.length) localStorage.setItem(HISTORY_KEY, JSON.stringify(msgs.slice(-MAX_STORED_TURNS)));
+      else localStorage.removeItem(HISTORY_KEY);
+    } catch {}
+  }, [turns, busy, restored]);
 
   async function send(prompt: string) {
     const text = prompt.trim();
@@ -203,9 +242,25 @@ export default function Console() {
               {busy ? "…" : "Send"}
             </Button>
           </div>
-          <p className="mt-2 text-center text-[10.5px] text-ash-400">
-            The agent reads live Robinhood Chain state and can route orders — it never signs. You approve every transaction.
-          </p>
+          <div className="mt-2 flex items-center justify-center gap-3">
+            <p className="text-center text-[10.5px] text-ash-400">
+              The agent reads live Robinhood Chain state and can route orders — it never signs. You
+              approve every transaction.
+            </p>
+            {turns.length ? (
+              <button
+                onClick={() => {
+                  setTurns([]);
+                  try {
+                    localStorage.removeItem(HISTORY_KEY);
+                  } catch {}
+                }}
+                className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-ash-500 hover:text-rose-500"
+              >
+                clear
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

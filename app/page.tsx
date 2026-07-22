@@ -181,7 +181,7 @@ export default function ArenaPage() {
             </span>
             <Meta label="Round" value={String(data.round)} />
             <Meta label="Last" value={ago(data.lastTickAt)} />
-            <Meta label="Spread" value={`${usd(spread)} USDG`} />
+            <Meta label="1st vs 5th" value={`${usd(spread)} USDG`} />
             <div className="ml-auto flex flex-wrap gap-1.5">
               <Badge tone={data.config.receiverConfigured ? "up" : "gold"}>
                 x402 {data.config.receiverConfigured ? "enforced" : "unconfigured"}
