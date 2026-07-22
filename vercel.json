@@ -5,5 +5,12 @@
       "path": "/api/arena/tick",
       "schedule": "* * * * *"
     }
+  ],
+  "redirects": [
+    {
+      "source": "/arena",
+      "destination": "/",
+      "permanent": true
+    }
   ]
 }

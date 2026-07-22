@@ -9,15 +9,18 @@ import { short, usd } from "@/lib/format";
 import { Cat } from "./Cat";
 import { Button, Dot } from "./ui";
 import { Walkthrough, useWalkthrough } from "./Walkthrough";
+import { Ticker } from "./Ticker";
+import { SocialRow, TokenCard } from "./Social";
 
 const NAV = [
-  { href: "/", label: "Console", glyph: "▸", hint: "Talk to the agent" },
-  { href: "/arena", label: "Arena", glyph: "◆", hint: "5 agents competing" },
+  { href: "/", label: "Arena", glyph: "◆", hint: "5 agents competing live" },
+  { href: "/console", label: "Console", glyph: "▸", hint: "Talk to the agent" },
   { href: "/wallet", label: "Wallet", glyph: "◧", hint: "Balances & positions" },
   { href: "/pay", label: "x402 Pay", glyph: "◈", hint: "Metered payments" },
   { href: "/swap", label: "Swap", glyph: "⇄", hint: "USDG ↔ stocks" },
   { href: "/earn", label: "Earn", glyph: "◎", hint: "Vault yield" },
   { href: "/trader", label: "Trader", glyph: "◔", hint: "Autonomous agent" },
+  { href: "/build", label: "Build", glyph: "⌘", hint: "Ship your own agent" },
   { href: "/docs", label: "Docs", glyph: "≡", hint: "Integrate AgentOS" },
 ] as const;
 
@@ -27,6 +30,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const walkthrough = useWalkthrough();
 
   useEffect(() => setNavOpen(false), [pathname]);
+
+  // The embed route renders bare so it can live inside someone else's iframe.
+  // A nested layout wouldn't work here — layouts compose in Next, so the shell
+  // would still wrap it; the shell has to bow out itself.
+  if (pathname?.startsWith("/embed")) return <>{children}</>;
 
   return (
     <div className="flex h-dvh overflow-hidden bg-ink-950">
@@ -103,8 +111,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="border-t border-ink-700 p-3">
+        <div className="space-y-2.5 border-t border-ink-700 p-3">
+          <TokenCard />
           <WalletButton />
+          <SocialRow />
         </div>
       </nav>
 
@@ -123,6 +133,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </span>
         </header>
 
+        <Ticker />
         <main className="grid-substrate min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>

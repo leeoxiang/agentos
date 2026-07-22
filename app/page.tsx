@@ -1,349 +1,586 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
-import { CatHero, Cat } from "@/components/Cat";
-import { Badge, Button, Dot } from "@/components/ui";
+import Link from "next/link";
+import { PageBody, PageHeader } from "@/components/PageHeader";
+import { Cat, paletteFrom } from "@/components/Cat";
+import { AddrLink, Badge, Button, Dot, Empty, Loading, Panel, PanelHeader, TxLink } from "@/components/ui";
+import { ago, compact, pct, qty, usd } from "@/lib/format";
+import { useApi } from "@/lib/useApi";
+import { EquityCurve, type EquityPoint } from "@/components/EquityCurve";
 
-type Msg = { role: "user" | "assistant"; content: string };
-type ToolTrace = {
+type Standing = {
+  id: string;
   name: string;
-  input: Record<string, unknown>;
-  status: "running" | "ok" | "error";
-  result?: unknown;
-  error?: string;
+  handle: string;
+  color: string;
+  style: string;
+  thesis: string;
+  address: string;
+  cashUsdg: number;
+  position: { symbol: string; qty: number; avgCost: number; mark: number | null } | null;
+  equity: number;
+  pnl: number;
+  pnlPct: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  x402SpentUsdg: number;
+  x402Calls: number;
+  trades: number;
+  wins: number;
+  losses: number;
 };
-type Turn = { msg: Msg; tools: ToolTrace[] };
 
-const SUGGESTIONS = [
-  { label: "Screen the market", prompt: "Screen the most liquid tokenized stocks and tell me what's actually tradable right now." },
-  { label: "Quote NVDA", prompt: "What's NVDA trading at on-chain, and how deep is the pool?" },
-  { label: "Route a $50 buy", prompt: "Route a 50 USDG buy of AAPL for my wallet and show me the price impact." },
-  { label: "Where's the yield?", prompt: "What's the USDG vault paying, and how does it work?" },
-  { label: "Explain x402", prompt: "Explain how x402 payments work here and what an agent can buy." },
-  { label: "Check the trader", prompt: "What is the autonomous trading agent doing right now?" },
-];
+type Entry = {
+  id: string;
+  t: number;
+  round: number;
+  agentId: string;
+  symbol: string;
+  action: "buy" | "sell" | "hold";
+  conviction: number;
+  rationale: string;
+  thought: string;
+  price: number;
+  qty: number;
+  notional: number;
+  readout: Record<string, number>;
+  tape: "live" | "sim";
+  x402: { priceUsdg: number; status: string; reason?: string; nonce: string; payer: string; txHash?: string };
+};
 
-export default function Console() {
-  const { address } = useAccount();
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [input, setInput] = useState("");
+type Arena = {
+  round: number;
+  startedAt: number;
+  lastTickAt: number | null;
+  tape: "live" | "sim";
+  flatRounds: number;
+  startingBankroll: number;
+  universe: string[];
+  leaderboard: Standing[];
+  feed: Entry[];
+  curve: EquityPoint[];
+  news: { fetchedAt: number; items: Array<{ symbol: string; sentiment: number; headline: string; source: string; summary: string }> };
+  config: {
+    durableState: boolean;
+    receiverConfigured: boolean;
+    facilitatorArmed: boolean;
+    commentaryEnabled: boolean;
+    defaultSeed: boolean;
+  };
+};
+
+const TICK_MS = 25_000;
+
+export default function ArenaPage() {
+  const { data, loading, refresh } = useApi<Arena>("/api/arena", 20_000);
+  const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [turns, busy]);
-
-  async function send(prompt: string) {
-    const text = prompt.trim();
-    if (!text || busy) return;
-
-    setError(null);
-    setInput("");
+  async function runRound() {
+    if (busy) return;
     setBusy(true);
-
-    const history: Msg[] = [...turns.map((t) => t.msg), { role: "user", content: text }];
-    setTurns((prev) => [...prev, { msg: { role: "user", content: text }, tools: [] }]);
-
-    // The assistant turn is appended empty, then filled as the NDJSON stream
-    // arrives — so tool calls appear the moment they start, not at the end.
-    let cursor = -1;
-    setTurns((prev) => {
-      cursor = prev.length;
-      return [...prev, { msg: { role: "assistant", content: "" }, tools: [] }];
-    });
-
-    const patch = (fn: (t: Turn) => Turn) =>
-      setTurns((prev) => prev.map((t, i) => (i === cursor ? fn(t) : t)));
-
+    setErr(null);
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, account: address }),
-      });
-
-      if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // NDJSON: everything before the final newline is a complete event.
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const ev = JSON.parse(line) as
-            | { type: "text"; text: string }
-            | ({ type: "tool" } & ToolTrace)
-            | { type: "error"; error: string }
-            | { type: "done" };
-
-          if (ev.type === "text") {
-            patch((t) => ({
-              ...t,
-              msg: { ...t.msg, content: t.msg.content ? `${t.msg.content}\n\n${ev.text}` : ev.text },
-            }));
-          } else if (ev.type === "tool") {
-            patch((t) => {
-              const i = t.tools.findIndex(
-                (x) => x.name === ev.name && JSON.stringify(x.input) === JSON.stringify(ev.input)
-              );
-              const entry: ToolTrace = {
-                name: ev.name,
-                input: ev.input,
-                status: ev.status,
-                result: ev.result,
-                error: ev.error,
-              };
-              const tools = [...t.tools];
-              if (i >= 0) tools[i] = entry;
-              else tools.push(entry);
-              return { ...t, tools };
-            });
-          } else if (ev.type === "error") {
-            setError(ev.error);
-          }
-        }
-      }
+      const res = await fetch("/api/arena/tick", { method: "POST" });
+      const body = await res.json();
+      if (!res.ok && !body.busy) throw new Error(body.error ?? "round failed");
+      refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The agent failed to respond.");
+      setErr(e instanceof Error ? e.message : "round failed");
     } finally {
       setBusy(false);
-      textarea.current?.focus();
     }
   }
 
-  const empty = turns.length === 0;
+  async function setTape(tape: "live" | "sim") {
+    await fetch("/api/arena", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tape }),
+    });
+    refresh();
+  }
+
+  useEffect(() => {
+    if (!running) {
+      if (timer.current) clearInterval(timer.current);
+      timer.current = null;
+      return;
+    }
+    runRound();
+    timer.current = setInterval(runRound, TICK_MS);
+    return () => {
+      if (timer.current) clearInterval(timer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  const board = data?.leaderboard ?? [];
+  const feed = (data?.feed ?? []).filter((e) => !focus || e.agentId === focus);
+  const best = board[0];
+  const worst = board[board.length - 1];
+  const spread = best && worst ? best.equity - worst.equity : 0;
 
   return (
-    <div className="flex h-full flex-col">
-      <div ref={scroller} className="flex-1 overflow-y-auto">
-        {empty ? <Splash onPick={send} /> : null}
-
-        <div className="mx-auto w-full max-w-[720px] px-5 pb-6">
-          {turns.map((turn, i) => (
-            <div key={i} className="animate-rise py-5">
-              {turn.msg.role === "user" ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-[2px] border border-ink-600 bg-ink-800 px-3.5 py-2.5 text-[13.5px] leading-relaxed text-ash-100">
-                    {turn.msg.content}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex gap-3">
-                  <div className="mt-0.5 shrink-0">
-                    <Cat size={24} muted={!turn.msg.content && turn.tools.length === 0} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    {turn.tools.map((tool, j) => (
-                      <ToolCard key={j} tool={tool} />
-                    ))}
-                    {turn.msg.content ? (
-                      <Markdown text={turn.msg.content} />
-                    ) : busy && i === turns.length - 1 && turn.tools.length === 0 ? (
-                      <div className="flex items-center gap-2 py-1 text-[12px] text-ash-400">
-                        <Dot tone="flame" pulse />
-                        thinking
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              )}
+    <>
+      <PageHeader
+        eyebrow="Live competition"
+        title="Agent arena"
+        right={
+          <div className="flex items-center gap-2.5 rounded-[2px] border border-mint-500/30 bg-mint-500/8 px-3 py-2">
+            <Dot tone="up" pulse />
+            <div className="leading-none">
+              <div className="text-[12px] font-medium text-mint-500">Running live</div>
+              <div className="tnum mt-1 text-[10.5px] text-ash-400">
+                {data?.lastTickAt ? `round ${data.round} · ${ago(data.lastTickAt)}` : "starting…"}
+              </div>
             </div>
-          ))}
+          </div>
+        }
+      >
+        Five agents, one market, five incompatible theses. This runs continuously —
+        a round fires every minute whether anyone is watching or not. Each agent pays
+        for its own market data over x402 before it may act, reads the same headlines,
+        and trades a 1,000 USDG book against live Robinhood Chain prices.
+      </PageHeader>
 
-          {error ? (
-            <div className="mb-4 rounded-[2px] border border-rose-500/40 bg-rose-500/8 px-3.5 py-2.5 text-[12px] text-rose-500">
-              {error}
+      <PageBody>
+        {err ? (
+          <div className="mb-4 rounded-[2px] border border-rose-500/40 bg-rose-500/8 px-3.5 py-2.5 text-[12px] text-rose-500">
+            {err}
+          </div>
+        ) : null}
+
+        {/* The chain is frequently dormant. Say so outright rather than
+            letting a flat leaderboard read as a broken page. */}
+        {data && data.tape === "live" && data.flatRounds >= 2 ? (
+          <div className="mb-4 rounded-[2px] border border-gold-500/40 bg-gold-500/8 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <Badge tone="gold">market dormant</Badge>
+              <span className="text-[12.5px] text-ash-200">
+                No swaps have moved these pools for {data.flatRounds} rounds — the live tape is
+                genuinely flat, so the agents correctly do nothing.
+              </span>
+              <Button size="sm" variant="outline" className="ml-auto" onClick={() => setTape("sim")}>
+                Switch to simulated tape
+              </Button>
             </div>
+          </div>
+        ) : null}
+
+        {data && data.tape === "sim" ? (
+          <div className="mb-4 rounded-[2px] border border-flame-500/40 bg-flame-500/8 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <Badge tone="flame">simulated tape</Badge>
+              <span className="text-[12.5px] text-ash-200">
+                Prices are generated around the real on-chain spot. Depth, fee tiers, routing and
+                every x402 payment stay real — only the price path is synthetic.
+              </span>
+              <Button size="sm" variant="outline" className="ml-auto" onClick={() => setTape("live")}>
+                Back to live tape
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Status strip — states plainly which parts are live. */}
+        {data ? (
+          <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[2px] border border-ink-700 bg-ink-900 px-4 py-2.5">
+            <span className="flex items-center gap-2">
+              <Dot tone="up" pulse />
+              <span className="text-[12px] text-ash-200">Round every 60s, around the clock</span>
+            </span>
+            <Meta label="Round" value={String(data.round)} />
+            <Meta label="Last" value={ago(data.lastTickAt)} />
+            <Meta label="Spread" value={`${usd(spread)} USDG`} />
+            <div className="ml-auto flex flex-wrap gap-1.5">
+              <Badge tone={data.tape === "live" ? "up" : "flame"}>
+                {data.tape === "live" ? "live tape" : "sim tape"}
+              </Badge>
+              <Badge tone={data.config.receiverConfigured ? "up" : "gold"}>
+                x402 {data.config.receiverConfigured ? "enforced" : "unconfigured"}
+              </Badge>
+              <Badge tone={data.config.facilitatorArmed ? "up" : "neutral"}>
+                {data.config.facilitatorArmed ? "settling" : "verify-only"}
+              </Badge>
+              <Badge tone={data.config.durableState ? "up" : "neutral"}>
+                {data.config.durableState ? "durable" : "in-memory"}
+              </Badge>
+              <Badge tone={data.config.commentaryEnabled ? "flame" : "neutral"}>
+                {data.config.commentaryEnabled ? "commentary on" : "commentary off"}
+              </Badge>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Leaderboard */}
+        <div className="mb-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
+          {loading && !data
+            ? [0, 1, 2, 3, 4].map((i) => <Loading key={i} className="h-[188px] w-full" />)
+            : board.map((s, rank) => (
+                <AgentCard
+                  key={s.id}
+                  s={s}
+                  rank={rank}
+                  starting={data!.startingBankroll}
+                  active={focus === s.id}
+                  onClick={() => setFocus(focus === s.id ? null : s.id)}
+                />
+              ))}
+        </div>
+
+        {data?.news?.items?.length ? (
+          <Panel className="mb-4">
+            <PanelHeader
+              title="The tape everyone is reading"
+              hint="Live headlines. Every agent sees these — they just disagree about what they mean."
+              right={
+                <Badge tone="neutral">{ago(data.news.fetchedAt)}</Badge>
+              }
+            />
+            <div className="divide-y divide-ink-800">
+              {data.news.items.map((n) => {
+                const tone =
+                  n.sentiment >= 0.2 ? "up" : n.sentiment <= -0.2 ? "down" : "neutral";
+                const label =
+                  n.sentiment >= 0.2 ? "bullish" : n.sentiment <= -0.2 ? "bearish" : "neutral";
+                return (
+                  <div key={n.symbol} className="flex flex-wrap items-start gap-x-3 gap-y-1.5 px-4 py-3">
+                    <span className="tnum w-12 shrink-0 text-[13px] font-medium text-ash-100">
+                      {n.symbol}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] leading-snug text-ash-200">{n.headline}</div>
+                      <div className="mt-1 text-[11px] leading-snug text-ash-400">{n.summary}</div>
+                      <div className="mt-1 font-mono text-[10px] text-ash-500">{n.source}</div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge tone={tone as "up" | "down" | "neutral"}>{label}</Badge>
+                      <span
+                        className={`tnum text-[11px] ${
+                          n.sentiment > 0 ? "text-mint-500" : n.sentiment < 0 ? "text-rose-500" : "text-ash-400"
+                        }`}
+                      >
+                        {n.sentiment >= 0 ? "+" : ""}
+                        {n.sentiment.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-ink-700 px-4 py-2.5 text-[10.5px] leading-snug text-ash-400">
+              Each agent weights the news differently — Momo leans into a catalyst, Vega fades the
+              same story. A headline that contradicts a signal strongly enough cancels the trade.
+            </div>
+          </Panel>
+        ) : null}
+
+        {data && data.curve?.length > 1 ? (
+          <Panel className="mb-4">
+            <PanelHeader
+              title="Equity curves"
+              hint={`Every agent's book value, sampled once per round. Dashed line is the ${usd(data.startingBankroll)} USDG start.`}
+              right={
+                focus ? (
+                  <Badge tone="neutral">
+                    highlighting {board.find((b) => b.id === focus)?.name}
+                  </Badge>
+                ) : null
+              }
+            />
+            <div className="px-3 pb-3 pt-4">
+              <EquityCurve
+                curve={data.curve}
+                agents={board.map((b) => ({ id: b.id, name: b.name, color: b.color }))}
+                starting={data.startingBankroll}
+                highlight={focus}
+              />
+            </div>
+          </Panel>
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+          <Panel>
+            <PanelHeader
+              title="Live feed"
+              hint={focus ? `Filtered to ${board.find((b) => b.id === focus)?.name}` : "Every decision, newest first"}
+              right={
+                focus ? (
+                  <Button size="sm" variant="ghost" onClick={() => setFocus(null)}>
+                    Clear filter
+                  </Button>
+                ) : null
+              }
+            />
+            {!feed.length ? (
+              <Empty>
+                Nothing yet. Hit <span className="text-flame-500">Start</span> and the agents begin
+                paying for data and taking sides.
+              </Empty>
+            ) : (
+              <div className="max-h-[620px] overflow-y-auto">
+                {feed.map((e) => (
+                  <FeedRow key={e.id} e={e} agent={board.find((b) => b.id === e.agentId)} />
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          <div className="space-y-4">
+            <Panel>
+              <PanelHeader title="How a round runs" />
+              <ol className="divide-y divide-ink-800">
+                {[
+                  ["Rotate", "One ticker is chosen from the universe so all five read the same tape."],
+                  ["Pay", "Each agent signs an EIP-3009 authorization over USDG for the 0.001 quote. Real signature, real on-chain nonce and balance checks."],
+                  ["Decide", "Each strategy reads a different signal out of the pool's TWAP oracle — trend, range, breakout, depth, volatility."],
+                  ["Fill", "Paper book, real price: the pool's own fee tier is charged against every fill."],
+                  ["Talk", "Commentary is written after the fact. The strategies decide; the model only narrates."],
+                ].map(([t, b], i) => (
+                  <li key={t} className="flex gap-3 px-4 py-3">
+                    <span className="tnum mt-0.5 text-[11px] text-flame-500">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <div>
+                      <div className="text-[12.5px] font-medium text-ash-100">{t}</div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-ash-400">{b}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </Panel>
+
+            {data && !data.config.receiverConfigured ? (
+              <Panel className="border-gold-500/30">
+                <PanelHeader title="Payments not enforced" />
+                <p className="px-4 py-3 text-[11.5px] leading-relaxed text-ash-400">
+                  <code className="font-mono text-flame-400">NEXT_PUBLIC_PAY_TO</code> is unset, so
+                  every agent&rsquo;s x402 charge is rejected before verification and they all trade
+                  without paying. Set a receiver to make the meter real.
+                </p>
+              </Panel>
+            ) : null}
+
+            {data && data.config.defaultSeed ? (
+              <Panel>
+                <PanelHeader title="Agent wallets" hint="Deterministic from ARENA_SEED" />
+                <div className="space-y-1.5 px-4 py-3">
+                  {board.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between gap-2">
+                      <span className="text-[11.5px]" style={{ color: s.color }}>
+                        {s.name}
+                      </span>
+                      <AddrLink addr={s.address} />
+                    </div>
+                  ))}
+                  <p className="pt-2 text-[10.5px] leading-relaxed text-ash-400">
+                    Public demo seed — these sign real authorizations but hold no USDG, so payments
+                    verify and stop at <span className="font-mono">insufficient_funds</span>. Set{" "}
+                    <code className="font-mono text-flame-400">ARENA_SEED</code> and fund them to
+                    settle for real.
+                  </p>
+                </div>
+              </Panel>
+            ) : null}
+
+            <Panel>
+              <PanelHeader title="Reset" />
+              <div className="p-4">
+                <p className="text-[11px] leading-snug text-ash-400">
+                  Returns every agent to {usd(data?.startingBankroll ?? 1000)} USDG and clears the feed.
+                </p>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={async () => {
+                    setRunning(false);
+                    await fetch("/api/arena", { method: "DELETE" });
+                    refresh();
+                  }}
+                >
+                  Reset the arena
+                </Button>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </PageBody>
+    </>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="flex items-baseline gap-1.5">
+      <span className="label">{label}</span>
+      <span className="tnum text-[12px] text-ash-100">{value}</span>
+    </span>
+  );
+}
+
+const MEDALS = ["01", "02", "03", "04", "05"];
+
+function AgentCard({
+  s,
+  rank,
+  starting,
+  active,
+  onClick,
+}: {
+  s: Standing;
+  rank: number;
+  starting: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const up = s.pnl >= 0;
+  // Bar is centred on the starting bankroll: right of centre is profit.
+  const swing = Math.min(1, Math.abs(s.pnl) / (starting * 0.05));
+
+  return (
+    <button
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-[2px] border bg-ink-900 p-3.5 text-left transition-colors ${
+        active ? "border-ash-400" : "border-ink-700 hover:border-ink-600"
+      }`}
+    >
+      <span className="absolute left-0 top-0 h-full w-[2px]" style={{ background: s.color }} />
+
+      <div className="flex items-start gap-2.5">
+        <Cat size={34} palette={paletteFrom(s.color)} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1.5">
+            <span className="tnum text-[10px] text-ash-500">{MEDALS[rank]}</span>
+            <span className="truncate text-[13.5px] font-semibold text-ash-100">{s.name}</span>
+          </div>
+          <div className="truncate font-mono text-[10px] text-ash-400">{s.handle}</div>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <div className="tnum text-[19px] leading-none text-ash-100">{usd(s.equity)}</div>
+        <div className={`tnum mt-1 text-[11.5px] ${up ? "text-mint-500" : "text-rose-500"}`}>
+          {up ? "+" : ""}
+          {usd(s.pnl)} · {pct(s.pnlPct)}
+        </div>
+      </div>
+
+      <div className="mt-2.5 flex h-1 overflow-hidden rounded-[1px] bg-ink-800">
+        <div className="flex w-1/2 justify-end">
+          {!up ? <div className="bg-rose-500" style={{ width: `${swing * 100}%` }} /> : null}
+        </div>
+        <div className="w-1/2">
+          {up ? <div className="h-full bg-mint-500" style={{ width: `${swing * 100}%` }} /> : null}
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-1 border-t border-ink-800 pt-2.5">
+        <Row k="Position" v={s.position ? `${qty(s.position.qty)} ${s.position.symbol}` : "flat"} />
+        <Row k="Trades" v={`${s.trades} · ${s.wins}W ${s.losses}L`} />
+        <Row k="x402 spend" v={`${s.x402SpentUsdg.toFixed(3)} (${s.x402Calls})`} />
+      </div>
+
+      <p className="mt-2.5 line-clamp-2 text-[10.5px] leading-snug text-ash-400">{s.style} — {s.thesis}</p>
+
+      <Link
+        href={`/agent/${s.id}`}
+        onClick={(e) => e.stopPropagation()}
+        className="mt-2 block font-mono text-[10px] uppercase tracking-wider text-ash-500 hover:text-flame-500"
+      >
+        full record →
+      </Link>
+    </button>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10.5px] text-ash-400">{k}</span>
+      <span className="tnum text-[11px] text-ash-200">{v}</span>
+    </div>
+  );
+}
+
+function FeedRow({ e, agent }: { e: Entry; agent?: Standing }) {
+  const color = agent?.color ?? "#8f8f9d";
+  const tone = e.action === "buy" ? "up" : e.action === "sell" ? "down" : "neutral";
+  const paidTone =
+    e.x402.status === "settled"
+      ? "up"
+      : e.x402.status === "verified"
+        ? "flame"
+        : e.x402.status === "unfunded"
+          ? "gold"
+          : "down";
+
+  return (
+    <div className="animate-rise flex gap-3 border-b border-ink-800 px-4 py-3 last:border-0">
+      <div className="shrink-0 pt-0.5">
+        <Cat size={26} palette={paletteFrom(color)} />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[12.5px] font-medium" style={{ color }}>
+            {agent?.name ?? e.agentId}
+          </span>
+          <Badge tone={tone as "up" | "down" | "neutral"}>{e.action}</Badge>
+          <span className="tnum text-[12px] text-ash-100">{e.symbol}</span>
+          <span className="tnum text-[11px] text-ash-400">@ {usd(e.price)}</span>
+          {e.notional > 0 ? (
+            <span className="tnum text-[11px] text-flame-500">
+              {qty(e.qty)} for {usd(e.notional)} USDG
+            </span>
+          ) : null}
+          <span className="tnum ml-auto text-[10px] text-ash-500">r{e.round}</span>
+        </div>
+
+        {e.thought ? (
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ash-200">
+            <span className="text-ash-500">“</span>
+            {e.thought}
+            <span className="text-ash-500">”</span>
+          </p>
+        ) : null}
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-[10.5px] text-ash-400">{e.rationale}</span>
+          {e.conviction > 0 ? (
+            <span className="flex items-center gap-1.5">
+              <span className="label">conv</span>
+              <span className="inline-block h-1 w-10 overflow-hidden rounded-[1px] bg-ink-700">
+                <span
+                  className="block h-full"
+                  style={{ width: `${e.conviction * 100}%`, background: color }}
+                />
+              </span>
+            </span>
           ) : null}
         </div>
-      </div>
 
-      <div className="shrink-0 border-t border-ink-700 bg-ink-900/90 backdrop-blur">
-        <div className="mx-auto w-full max-w-[720px] px-5 py-4">
-          <div className="flex items-end gap-2 rounded-[2px] border border-ink-600 bg-ink-850 p-2 focus-within:border-flame-500">
-            <textarea
-              ref={textarea}
-              rows={1}
-              value={input}
-              disabled={busy}
-              onChange={(e) => {
-                setInput(e.target.value);
-                e.target.style.height = "auto";
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              placeholder={
-                address ? "Ask the agent to quote, route, or explain…" : "Connect a wallet, or just ask a question…"
-              }
-              className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-[13.5px] leading-relaxed text-ash-100 placeholder:text-ash-400 focus:outline-none disabled:opacity-50"
-            />
-            <Button onClick={() => send(input)} disabled={busy || !input.trim()} className="mb-0.5">
-              {busy ? "…" : "Send"}
-            </Button>
-          </div>
-          <p className="mt-2 text-center text-[10.5px] text-ash-400">
-            The agent reads live Robinhood Chain state and can route orders — it never signs. You approve every transaction.
-          </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <Badge tone={paidTone as "up" | "flame" | "gold" | "down"}>
+            x402 {e.x402.priceUsdg} · {e.x402.status}
+          </Badge>
+          {e.x402.reason ? (
+            <span className="font-mono text-[10px] text-ash-500">{e.x402.reason}</span>
+          ) : null}
+          <span className="font-mono text-[10px] text-ash-500">
+            nonce {e.x402.nonce.slice(0, 10)}…
+          </span>
+          {e.tape === "sim" ? (
+            <span className="font-mono text-[10px] text-flame-500">sim price</span>
+          ) : null}
+          {e.x402.txHash ? <TxLink hash={e.x402.txHash} /> : null}
         </div>
       </div>
-    </div>
-  );
-}
-
-function Splash({ onPick }: { onPick: (p: string) => void }) {
-  return (
-    <div className="mx-auto w-full max-w-[720px] px-5 pb-2 pt-14 text-center">
-      <CatHero size={84} />
-      <h1 className="mt-6 text-[30px] font-semibold leading-tight tracking-tight text-ash-100">
-        The wallet your agents<br />
-        <span className="text-flame-500">actually operate.</span>
-      </h1>
-      <p className="mx-auto mt-3.5 max-w-[480px] text-[13.5px] leading-relaxed text-ash-300">
-        x402 payments settled in USDG, tokenized-stock swaps, and DeFi yield — all
-        on Robinhood Chain. Your agent gets wallet capabilities, never wallet ownership.
-      </p>
-
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
-        <Badge tone="flame">EIP-3009 settlement</Badge>
-        <Badge>94 stock tokens</Badge>
-        <Badge>Uniswap V3 routing</Badge>
-        <Badge>ERC-4626 yield</Badge>
-      </div>
-
-      <div className="mt-8 grid gap-1.5 sm:grid-cols-2">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s.label}
-            onClick={() => onPick(s.prompt)}
-            className="group rounded-[2px] border border-ink-700 bg-ink-900 px-3.5 py-3 text-left transition-colors hover:border-flame-500/50 hover:bg-ink-850"
-          >
-            <div className="text-[12.5px] font-medium text-ash-100 group-hover:text-flame-500">
-              {s.label}
-            </div>
-            <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-ash-400">{s.prompt}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ToolCard({ tool }: { tool: ToolTrace }) {
-  const [open, setOpen] = useState(false);
-  const tone = tool.status === "error" ? "down" : tool.status === "running" ? "flame" : "up";
-
-  return (
-    <div className="mb-2 rounded-[2px] border border-ink-700 bg-ink-900">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-ink-850"
-      >
-        <Dot tone={tone} pulse={tool.status === "running"} />
-        <span className="font-mono text-[11px] text-ash-200">{tool.name}</span>
-        <span className="truncate font-mono text-[10.5px] text-ash-400">
-          {summarize(tool.input)}
-        </span>
-        <span className="ml-auto font-mono text-[10px] text-ash-400">{open ? "−" : "+"}</span>
-      </button>
-      {open ? (
-        <pre className="max-h-64 overflow-auto border-t border-ink-700 px-3 py-2 font-mono text-[10.5px] leading-relaxed text-ash-300">
-          {tool.error ?? JSON.stringify(tool.result ?? tool.input, null, 2)}
-        </pre>
-      ) : null}
-    </div>
-  );
-}
-
-function summarize(input: Record<string, unknown>): string {
-  const parts = Object.entries(input)
-    .filter(([, v]) => v !== undefined && v !== null && v !== "")
-    .map(([k, v]) => `${k}=${typeof v === "string" && v.length > 14 ? `${v.slice(0, 8)}…` : v}`);
-  return parts.length ? `· ${parts.join(" ")}` : "";
-}
-
-/**
- * Minimal markdown for the agent's replies.
- *
- * Deliberately not a full parser: the model is prompted for short, factual
- * answers, so bold, code, bullets and headings cover everything it emits —
- * and shipping a parser here would be more surface area than the feature needs.
- */
-function Markdown({ text }: { text: string }) {
-  const inline = (s: string) =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/`([^`]+)`/g, '<code class="rounded-[2px] bg-ink-800 px-1 py-0.5 font-mono text-[11.5px] text-flame-400">$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-ash-100">$1</strong>')
-      .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em class="text-ash-200">$1</em>');
-
-  const blocks = text.split("\n\n");
-
-  return (
-    <div className="space-y-3 text-[13.5px] leading-relaxed text-ash-200">
-      {blocks.map((block, i) => {
-        const lines = block.split("\n");
-
-        if (lines.every((l) => /^\s*[-*•]\s+/.test(l))) {
-          return (
-            <ul key={i} className="space-y-1.5">
-              {lines.map((l, j) => (
-                <li key={j} className="flex gap-2">
-                  <span className="mt-[7px] h-1 w-1 shrink-0 bg-flame-500" />
-                  <span dangerouslySetInnerHTML={{ __html: inline(l.replace(/^\s*[-*•]\s+/, "")) }} />
-                </li>
-              ))}
-            </ul>
-          );
-        }
-
-        if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
-          return (
-            <ol key={i} className="space-y-1.5">
-              {lines.map((l, j) => (
-                <li key={j} className="flex gap-2">
-                  <span className="tnum shrink-0 text-flame-500">{j + 1}.</span>
-                  <span dangerouslySetInnerHTML={{ __html: inline(l.replace(/^\s*\d+[.)]\s+/, "")) }} />
-                </li>
-              ))}
-            </ol>
-          );
-        }
-
-        if (/^#{1,4}\s/.test(block)) {
-          return (
-            <h3 key={i} className="text-[14px] font-semibold text-ash-100">
-              <span dangerouslySetInnerHTML={{ __html: inline(block.replace(/^#{1,4}\s/, "")) }} />
-            </h3>
-          );
-        }
-
-        return (
-          <p key={i} dangerouslySetInnerHTML={{ __html: inline(block).replace(/\n/g, "<br/>") }} />
-        );
-      })}
     </div>
   );
 }

@@ -78,7 +78,10 @@ export async function POST(req: Request) {
 
       try {
         for (let turn = 0; turn < MAX_TURNS; turn++) {
-          const response = await client.messages.create({
+          // Streaming, so the browser can type the answer out as it arrives
+          // instead of waiting for the whole turn. Deltas are forwarded
+          // verbatim; the client owns how they're rendered.
+          const stream = client.messages.stream({
             model: MODEL,
             max_tokens: 8000,
             thinking: { type: "adaptive" },
@@ -88,9 +91,23 @@ export async function POST(req: Request) {
             messages,
           });
 
-          for (const block of response.content) {
-            if (block.type === "text" && block.text.trim()) send({ type: "text", text: block.text });
+          let blockIndex = -1;
+          for await (const event of stream) {
+            if (event.type === "content_block_start" && event.content_block.type === "text") {
+              blockIndex = event.index;
+              // Signals a new paragraph boundary to the client without it having
+              // to guess from the delta text.
+              send({ type: "text_start" });
+            } else if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta" &&
+              event.index === blockIndex
+            ) {
+              send({ type: "delta", text: event.delta.text });
+            }
           }
+
+          const response = await stream.finalMessage();
 
           if (response.stop_reason !== "tool_use") {
             send({ type: "done" });

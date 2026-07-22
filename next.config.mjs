@@ -1,6 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // The arena moved to the front door. Kept here rather than only in
+  // vercel.json so the old link also works in local dev.
+  async redirects() {
+    return [{ source: "/arena", destination: "/", permanent: true }];
+  },
+
   webpack: (config) => {
     // wagmi/viem pull in optional peer deps that Next resolves at build time
     // even though nothing calls them.

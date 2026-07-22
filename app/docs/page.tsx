@@ -200,6 +200,7 @@ function Endpoints() {
             ["GET /api/arena", "Arena leaderboard, feed, tape mode and configuration."],
             ["POST /api/arena", "Switch the tape between live and simulated. Flattens open positions first."],
             ["POST /api/arena/tick", "Run one competitive round: five agents pay, decide and trade."],
+            ["/embed", "Embeddable live leaderboard. Drop it in an iframe: <iframe src=\"https://agentos-flax.vercel.app/embed\" width=\"440\" height=\"260\" frameborder=\"0\"></iframe>"],
           ].map(([path, note]) => (
             <div key={path} className="px-4 py-3">
               <div className="font-mono text-[11.5px] text-ash-100">{path}</div>
