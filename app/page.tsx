@@ -60,7 +60,19 @@ type Arena = {
   leaderboard: Standing[];
   feed: Entry[];
   curve: EquityPoint[];
-  news: { fetchedAt: number; items: Array<{ symbol: string; sentiment: number; headline: string; source: string; summary: string }> };
+  news: {
+    fetchedAt: number;
+    verified: boolean;
+    items: Array<{
+      symbol: string;
+      sentiment: number;
+      headline: string;
+      source: string;
+      url: string;
+      publishedAt: string;
+      summary: string;
+    }>;
+  };
   config: {
     durableState: boolean;
     receiverConfigured: boolean;
@@ -239,7 +251,12 @@ export default function ArenaPage() {
               title="The tape everyone is reading"
               hint="Live headlines. Every agent sees these — they just disagree about what they mean."
               right={
-                <Badge tone="neutral">{ago(data.news.fetchedAt)}</Badge>
+                <div className="flex items-center gap-1.5">
+                  <Badge tone={data.news.verified ? "up" : "gold"}>
+                    {data.news.verified ? "web-searched" : "unverified"}
+                  </Badge>
+                  <Badge tone="neutral">fetched {ago(data.news.fetchedAt)}</Badge>
+                </div>
               }
             />
             <div className="divide-y divide-ink-800">
@@ -254,9 +271,24 @@ export default function ArenaPage() {
                       {n.symbol}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[12.5px] leading-snug text-ash-200">{n.headline}</div>
+                      <a
+                        href={n.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[12.5px] leading-snug text-ash-200 underline decoration-ink-600 underline-offset-2 hover:text-flame-500 hover:decoration-flame-500"
+                      >
+                        {n.headline}
+                      </a>
                       <div className="mt-1 text-[11px] leading-snug text-ash-400">{n.summary}</div>
-                      <div className="mt-1 font-mono text-[10px] text-ash-500">{n.source}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[10px] text-ash-500">
+                        <span>{n.source}</span>
+                        <span>·</span>
+                        <span>{ago(Date.parse(n.publishedAt))}</span>
+                        <span>·</span>
+                        <a href={n.url} target="_blank" rel="noreferrer" className="hover:text-flame-500">
+                          verify ↗
+                        </a>
+                      </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <Badge tone={tone as "up" | "down" | "neutral"}>{label}</Badge>
@@ -274,8 +306,11 @@ export default function ArenaPage() {
               })}
             </div>
             <div className="border-t border-ink-700 px-4 py-2.5 text-[10.5px] leading-snug text-ash-400">
-              Each agent weights the news differently — Momo leans into a catalyst, Vega fades the
-              same story. A headline that contradicts a signal strongly enough cancels the trade.
+              Every headline is fetched by live web search and carries its own source link and
+              publish date — click through to verify any of them. Items without a resolvable URL,
+              or older than 72 hours, are dropped rather than shown. Each agent weights the news
+              differently: Momo leans into a catalyst, Vega fades the same story, and a headline
+              that contradicts a signal strongly enough cancels the trade outright.
             </div>
           </Panel>
         ) : null}

@@ -631,7 +631,7 @@ export async function markPositions(state: ArenaState): Promise<Record<string, n
   if (!symbols.length) return {};
   // Marking to market only needs prices — skip the news fetch entirely rather
   // than paying for a web search to compute a number that ignores it.
-  const snaps = await snapshotMarket(symbols, { fetchedAt: 0, items: [] });
+  const snaps = await snapshotMarket(symbols, { fetchedAt: 0, items: [], verified: false });
   return Object.fromEntries(snaps.map((s) => [s.symbol, s.price]));
 }
 

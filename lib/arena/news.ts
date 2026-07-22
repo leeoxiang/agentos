@@ -3,15 +3,21 @@ import { kvGet, kvSet } from "../kv";
 import { STOCKS } from "../stocks";
 
 /**
- * Real headlines for the tickers the agents trade.
+ * Real, verifiable headlines for the tickers the agents trade.
  *
- * The agents read on-chain price and depth, which tells them *what* the market
- * did but never *why*. News closes that gap: a sentiment read per ticker feeds
- * one agent's strategy directly, and the headlines ground every agent's
- * commentary in something that actually happened rather than pure price talk.
+ * Two integrity rules, because "the model returned a plausible headline" is not
+ * the same thing as "this happened":
  *
- * Fetched with Claude's server-side web search and cached hard — search is the
- * most expensive call in the system and headlines do not change by the minute.
+ *  1. A response that did not actually invoke web search is discarded. Without
+ *     that check a search failure degrades silently into the model reciting its
+ *     training data as today's news — stale, confident, and indistinguishable
+ *     from the real thing.
+ *  2. Every item must carry a resolvable URL and a publish date. An item without
+ *     a source is dropped rather than shown, which removes the room a model has
+ *     to pad a real search result with recalled detail.
+ *
+ * Anything surviving both is rendered with its link and age visible, so a reader
+ * can check it rather than take our word for it.
  */
 
 export type TickerNews = {
@@ -20,17 +26,24 @@ export type TickerNews = {
   sentiment: number;
   headline: string;
   source: string;
+  /** Resolvable link to the article. Items without one are dropped. */
+  url: string;
+  /** ISO date the article was published. */
+  publishedAt: string;
   summary: string;
 };
 
 export type NewsSnapshot = {
   fetchedAt: number;
   items: TickerNews[];
+  /** False when search didn't run — the UI says so instead of implying freshness. */
+  verified: boolean;
 };
 
-const KEY = "agentos:arena:news:v1";
-/** Long by design: search is expensive and headlines are not tick data. */
-const TTL_MS = 20 * 60_000;
+const KEY = "agentos:arena:news:v2";
+const TTL_MS = 10 * 60_000;
+/** Older than this and it isn't news, it's history. */
+const MAX_AGE_HOURS = 72;
 
 const SCHEMA = {
   type: "object",
@@ -44,9 +57,11 @@ const SCHEMA = {
           sentiment: { type: "number" },
           headline: { type: "string" },
           source: { type: "string" },
+          url: { type: "string" },
+          publishedAt: { type: "string" },
           summary: { type: "string" },
         },
-        required: ["symbol", "sentiment", "headline", "source", "summary"],
+        required: ["symbol", "sentiment", "headline", "source", "url", "publishedAt", "summary"],
         additionalProperties: false,
       },
     },
@@ -55,23 +70,28 @@ const SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const EMPTY: NewsSnapshot = { fetchedAt: 0, items: [], verified: false };
+
+function hoursOld(iso: string): number {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return Number.POSITIVE_INFINITY;
+  return (Date.now() - t) / 3_600_000;
+}
+
 /**
- * Fetch headlines for the given tickers, or serve the cache.
+ * Fetch headlines for the given tickers, or serve a still-fresh cache.
  *
- * Returns an empty snapshot rather than throwing when search is unavailable —
- * news is an input to the agents, not a precondition for them running.
+ * Returns an empty, unverified snapshot rather than throwing — news is an input
+ * to the agents, not a precondition for them running.
  */
 export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
   const cached = await kvGet<NewsSnapshot>(KEY);
-  if (cached && Date.now() - cached.fetchedAt < TTL_MS) {
-    // Serve the cache only if it actually covers what's being asked for; a
-    // universe rotation shouldn't silently return news about other tickers.
+  if (cached?.verified && Date.now() - cached.fetchedAt < TTL_MS) {
     const covered = new Set(cached.items.map((i) => i.symbol));
     if (symbols.every((s) => covered.has(s))) return cached;
   }
 
-  if (!process.env.ANTHROPIC_API_KEY || !symbols.length)
-    return cached ?? { fetchedAt: Date.now(), items: [] };
+  if (!process.env.ANTHROPIC_API_KEY || !symbols.length) return cached ?? EMPTY;
 
   const named = symbols
     .map((s) => {
@@ -80,29 +100,42 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
     })
     .join(", ");
 
+  // The model has no clock. Without today's date, "recent" is anchored to its
+  // training data and it will confidently return months-old news as current.
+  const today = new Date().toISOString().slice(0, 10);
+
   try {
     const client = new Anthropic();
     const response = await client.messages.create({
       model: "claude-opus-4-8",
-      max_tokens: 2000,
+      max_tokens: 3000,
       thinking: { type: "adaptive" },
       output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
       system:
-        "You surface market-moving news for trading agents. Search for the most recent " +
-        "headline about each company, then return one entry per ticker.\n\n" +
-        "sentiment is a number from -1 (clearly bearish for the stock) to +1 (clearly bullish), " +
-        "0 when the news is genuinely mixed or nothing material happened. Be calibrated: most " +
-        "days are near zero. Do not invent a headline — if you find nothing recent for a ticker, " +
-        "say so in the headline field, set sentiment to 0, and set source to 'none'. " +
-        "summary must be one short sentence a trader could act on.",
+        `Today is ${today}. You surface genuinely recent market news for trading agents.\n\n` +
+        "You MUST use web search for every ticker. Never answer from memory — your training " +
+        "data is months stale and will be wrong.\n\n" +
+        "For each ticker return the single most recent, most material article you actually found:\n" +
+        "- url: the real article URL from your search results. Never construct or guess a URL.\n" +
+        "- publishedAt: the article's own publish date, ISO format. Never today's date by default.\n" +
+        "- headline: the article's actual headline, not a paraphrase.\n" +
+        "- sentiment: -1 (clearly bearish) to +1 (clearly bullish), 0 when mixed or immaterial. " +
+        "Be calibrated — most days are near zero.\n" +
+        "- summary: one short sentence a trader could act on.\n\n" +
+        "If search returns nothing recent for a ticker, omit that ticker entirely. Do not invent " +
+        "an entry, and do not pad a real article with details you did not read. An omitted ticker " +
+        "is correct; a fabricated one is not.",
       messages: [
-        {
-          role: "user",
-          content: `Latest market news for: ${named}. One entry per ticker.`,
-        },
+        { role: "user", content: `Search for the latest news on each of: ${named}.` },
       ],
     });
+
+    // Integrity gate: if search never ran, whatever came back is recall, not news.
+    const searched = response.content.some(
+      (b) => b.type === "server_tool_use" || b.type === "web_search_tool_result"
+    );
+    if (!searched) return cached ?? EMPTY;
 
     const text = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
@@ -110,20 +143,23 @@ export async function getNews(symbols: string[]): Promise<NewsSnapshot> {
       .join("");
 
     const parsed = JSON.parse(text) as { items: TickerNews[] };
-    const snapshot: NewsSnapshot = {
-      fetchedAt: Date.now(),
-      items: parsed.items.map((i) => ({
+
+    const items = parsed.items
+      .map((i) => ({
         ...i,
-        // Clamp: the model is asked for -1..1 but the strategy divides by this,
-        // and an out-of-range value would silently distort position sizing.
         sentiment: Math.max(-1, Math.min(1, Number(i.sentiment) || 0)),
-      })),
-    };
+      }))
+      // No source, no publication: drop it. This is the check that removes the
+      // model's room to pad a real result with invented specifics.
+      .filter((i) => /^https?:\/\/\S+\.\S+/.test(i.url ?? ""))
+      .filter((i) => hoursOld(i.publishedAt) <= MAX_AGE_HOURS)
+      .filter((i) => symbols.includes(i.symbol));
+
+    const snapshot: NewsSnapshot = { fetchedAt: Date.now(), items, verified: true };
     await kvSet(KEY, snapshot);
     return snapshot;
   } catch {
-    // Stale news beats no news; no news beats a broken round.
-    return cached ?? { fetchedAt: Date.now(), items: [] };
+    return cached ?? EMPTY;
   }
 }
 
