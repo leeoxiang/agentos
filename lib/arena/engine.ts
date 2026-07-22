@@ -1,7 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { PAY_TO, USDG_DECIMALS, USDG_DOMAIN } from "../chain";
-import { findPool, loadMarket, poolDepthUsdg, priceFromSqrt } from "../market";
-import { changePct, priceHistory, volatilityPct, type Candle } from "../twap";
+import { findPool, loadMarket, poolDepthUsdg, priceFromSqrt, type Pool } from "../market";
+import {
+  MIN_VOLUME_USDG,
+  PRICE_LOOKBACK_BLOCKS,
+  VOLUME_LOOKBACK_BLOCKS,
+  scanSwaps,
+  toCandles,
+} from "../volume";
+import { changePct, volatilityPct, type Candle } from "../twap";
 import { resolveStock } from "../order";
 import { CATALOG } from "../x402/catalog";
 import { buildRequirements } from "../x402/server";
@@ -26,62 +33,99 @@ const MIN_TRADE_USDG = 5;
 const UNIVERSE_SIZE = 12;
 
 /**
- * The competition universe, chosen from live liquidity rather than hardcoded.
+ * The competition universe, ranked by *traded volume* rather than depth.
  *
- * The obvious mega-caps are mostly *untradable* here — AAPL carries ~7K USDG of
- * depth while NVDA carries ~8M — so a fixed blue-chip list would hand the agents
- * a market they cannot trade. Ranking by real depth is the only way the universe
- * stays honest as pools come and go.
+ * Depth and volume are not the same thing, and on this chain they are almost
+ * inversely related: AAPL and TSLA hold liquidity and never trade, while NVDA
+ * and SPCX carry hundreds of fills an hour. An agent needs a counterparty, not a
+ * balance sheet — so a ticker only enters the arena if real money has moved
+ * through it recently.
  *
- * Cached because ranking means sweeping all 94 tokens, which is far too
- * expensive to repeat every round.
+ * Cached because ranking means scanning every stock pool's Swap events, which is
+ * far too expensive to repeat every round.
  */
-const UNIVERSE_TTL_MS = 5 * 60_000;
+const UNIVERSE_TTL_MS = 3 * 60_000;
 const g = globalThis as unknown as {
-  __arenaUniverse?: { at: number; symbols: string[] };
+  __arenaUniverse?: { at: number; symbols: string[]; volumes: Record<string, number> };
 };
+
+async function rankByVolume(): Promise<{ symbols: string[]; volumes: Record<string, number> }> {
+  const rows = (await loadMarket()).filter((r) => r.price !== null && r.pool);
+
+  const pools = (
+    await Promise.all(rows.map((r) => findPool(r.address).catch(() => null)))
+  ).filter((p): p is NonNullable<typeof p> => p !== null);
+
+  const activity = await scanSwaps(pools, VOLUME_LOOKBACK_BLOCKS);
+
+  const scored = rows
+    .map((row) => {
+      const pool = pools.find((p) => p.address === row.pool);
+      const act = pool ? activity.get(pool.address.toLowerCase()) : undefined;
+      return { symbol: row.symbol, volumeUsdg: act?.volumeUsdg ?? 0, swaps: act?.swaps ?? 0 };
+    })
+    .filter((s) => s.volumeUsdg >= MIN_VOLUME_USDG)
+    .sort((a, b) => b.volumeUsdg - a.volumeUsdg)
+    .slice(0, UNIVERSE_SIZE);
+
+  return {
+    symbols: scored.map((s) => s.symbol),
+    volumes: Object.fromEntries(scored.map((s) => [s.symbol, s.volumeUsdg])),
+  };
+}
 
 export async function resolveUniverse(): Promise<string[]> {
   const cached = g.__arenaUniverse;
   if (cached && Date.now() - cached.at < UNIVERSE_TTL_MS) return cached.symbols;
 
-  const rows = await loadMarket();
-  const symbols = rows
-    .filter((r) => r.price !== null && r.depthUsdg > 15_000)
-    .slice(0, UNIVERSE_SIZE)
-    .map((r) => r.symbol);
-
-  if (symbols.length) g.__arenaUniverse = { at: Date.now(), symbols };
-  return symbols;
+  const ranked = await rankByVolume();
+  if (ranked.symbols.length) g.__arenaUniverse = { at: Date.now(), ...ranked };
+  return ranked.symbols;
 }
 
-type Snapshot = MarketView & { fee: number };
+/** Traded volume per universe ticker, for the UI. */
+export function universeVolumes(): Record<string, number> {
+  return g.__arenaUniverse?.volumes ?? {};
+}
+
+type Snapshot = MarketView & { fee: number; volumeUsdg: number; swaps: number };
 
 /**
- * Pull one round's market data: spot, depth and real oracle history per ticker.
- * Tickers without a pool are dropped rather than faked.
+ * Pull one round's market data: spot, depth, and a price series rebuilt from
+ * actual fills. Tickers without a pool are dropped rather than faked.
  */
 async function snapshotMarket(symbols: string[]): Promise<Snapshot[]> {
-  const out = await Promise.all(
+  const resolved = await Promise.all(
     symbols.map(async (symbol) => {
       try {
         const stock = resolveStock(symbol);
         const pool = await findPool(stock.address);
-        if (!pool) return null;
-        const candles: Candle[] = await priceHistory(pool);
-        return {
-          symbol,
-          price: priceFromSqrt(pool.sqrtPriceX96, pool.usdgIsToken0),
-          depthUsdg: poolDepthUsdg(pool),
-          candles,
-          fee: pool.fee,
-        } satisfies Snapshot;
+        return pool ? { symbol, pool } : null;
       } catch {
         return null;
       }
     })
   );
-  return out.filter((s): s is Snapshot => s !== null);
+  const live = resolved.filter((r): r is { symbol: string; pool: Pool } => r !== null);
+  if (!live.length) return [];
+
+  const activity = await scanSwaps(live.map((l) => l.pool), PRICE_LOOKBACK_BLOCKS);
+
+  return live.map(({ symbol, pool }) => {
+    const act = activity.get(pool.address.toLowerCase());
+    // Swap events are the primary source; the oracle is only a fallback for a
+    // pool that happens to have cardinality but no recent fills.
+    const candles: Candle[] = act ? toCandles(act) : [];
+    return {
+      symbol,
+      price: priceFromSqrt(pool.sqrtPriceX96, pool.usdgIsToken0),
+      depthUsdg: poolDepthUsdg(pool),
+      candles,
+      fee: pool.fee,
+      volumeUsdg: act?.volumeUsdg ?? 0,
+      swaps: act?.swaps ?? 0,
+    } satisfies Snapshot;
+  });
 }
 
 function randomNonce(): `0x${string}` {

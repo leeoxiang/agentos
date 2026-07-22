@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { AGENTS } from "@/lib/arena/agents";
-import { equity, markPositions, resolveUniverse } from "@/lib/arena/engine";
+import { equity, markPositions, resolveUniverse, universeVolumes } from "@/lib/arena/engine";
 import { loadState, resetState, saveState, STARTING_BANKROLL } from "@/lib/arena/store";
 import { agentAddresses, usingDefaultSeed } from "@/lib/arena/wallets";
 import { isDurable } from "@/lib/kv";
@@ -54,6 +54,7 @@ export async function GET() {
     flatRounds: state.flatRounds,
     startingBankroll: STARTING_BANKROLL,
     universe: await resolveUniverse(),
+    universeVolumes: universeVolumes(),
     leaderboard,
     feed: state.feed.slice(0, 60),
     curve: state.curve.slice(-120),

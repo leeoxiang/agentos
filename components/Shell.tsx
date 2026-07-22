@@ -8,6 +8,7 @@ import { ADDR, robinhood } from "@/lib/chain";
 import { short, usd } from "@/lib/format";
 import { Cat } from "./Cat";
 import { Button, Dot } from "./ui";
+import { Walkthrough, useWalkthrough } from "./Walkthrough";
 
 const NAV = [
   { href: "/", label: "Console", glyph: "▸", hint: "Talk to the agent" },
@@ -23,11 +24,13 @@ const NAV = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
+  const walkthrough = useWalkthrough();
 
   useEffect(() => setNavOpen(false), [pathname]);
 
   return (
     <div className="flex h-dvh overflow-hidden bg-ink-950">
+      <Walkthrough open={walkthrough.open} onClose={walkthrough.close} />
       {/* Scrim for the mobile drawer. */}
       {navOpen ? (
         <button
@@ -85,6 +88,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+
+          <button
+            onClick={walkthrough.reopen}
+            className="mt-1 flex w-full items-center gap-3 rounded-[2px] px-3 py-2 text-ash-400 transition-colors hover:bg-ink-850 hover:text-ash-200"
+          >
+            <span className="w-4 text-center font-mono text-[13px]">?</span>
+            <span className="flex-1 text-left text-[13px]">How it works</span>
+          </button>
 
           <div className="mt-5 px-3">
             <div className="label mb-2">Network</div>
