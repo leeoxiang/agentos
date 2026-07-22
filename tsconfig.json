@@ -17,5 +17,9 @@
     "paths": { "@/*": ["./*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // `packages/*` are standalone npm packages with their own tsconfig and their
+  // own dependencies. Root `npm install` does not install them (no workspaces),
+  // so leaving them in the web app's program would fail to resolve their imports
+  // on a clean CI build even though it resolves locally.
+  "exclude": ["node_modules", "packages"]
 }

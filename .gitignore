@@ -12,3 +12,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# build output of packages/*
+dist
