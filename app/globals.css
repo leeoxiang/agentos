@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+/*
+ * AgentOS design system.
+ *
+ * Two ideas hold the whole thing together: a near-black substrate that lets a
+ * single warm orange carry every point of emphasis, and a 4px grid that the
+ * pixel mascot, the borders and the spacing all snap to. Nothing else glows.
+ */
+@theme {
+  --color-ink-950: #070708;
+  --color-ink-900: #0b0b0d;
+  --color-ink-850: #101013;
+  --color-ink-800: #16161a;
+  --color-ink-700: #1e1e23;
+  --color-ink-600: #2a2a31;
+  --color-ink-500: #3a3a44;
+
+  --color-ash-400: #6b6b78;
+  --color-ash-300: #8f8f9d;
+  --color-ash-200: #b8b8c4;
+  --color-ash-100: #e6e6ec;
+
+  /* The brand: a warm clay orange, with a hotter ember for accents. */
+  --color-flame-600: #b8542f;
+  --color-flame-500: #d97757;
+  --color-flame-400: #e8895f;
+  --color-ember-500: #ff6a1f;
+  --color-ember-400: #ff8a45;
+
+  --color-mint-500: #3ecf8e;
+  --color-rose-500: #f2555a;
+  --color-gold-500: #e5b567;
+
+  --font-mono: "Berkeley Mono", "JetBrains Mono", "SF Mono", ui-monospace,
+    "Cascadia Mono", Menlo, Consolas, monospace;
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+
+  --radius-pixel: 2px;
+}
+
+:root {
+  color-scheme: dark;
+  --shell-nav: 248px;
+}
+
+* {
+  border-color: var(--color-ink-700);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ash-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv02", "cv11", "ss01";
+  overflow: hidden;
+}
+
+/* The faint grid the whole UI sits on — 4px rhythm, scaled to 32. */
+.grid-substrate {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Pixel art must never be smoothed by the browser's scaler. */
+.pixelated {
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+}
+
+/* Tabular numerals everywhere a price or balance is shown — columns must align. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ash-400);
+}
+
+/* Scrollbars, kept in the palette rather than the OS default. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border: 3px solid var(--color-ink-950);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-600);
+}
+
+::selection {
+  background: var(--color-flame-500);
+  color: var(--color-ink-950);
+}
+
+/* Focus is a hard offset ring — no blur, consistent with the pixel language. */
+:focus-visible {
+  outline: 2px solid var(--color-flame-500);
+  outline-offset: 2px;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+.animate-bob {
+  animation: bob 3.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.animate-sweep {
+  animation: sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  animation: rise 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bob,
+  .animate-pulse-dot,
+  .animate-sweep,
+  .animate-rise {
+    animation: none;
+  }
+}
