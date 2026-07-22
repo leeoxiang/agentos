@@ -59,6 +59,7 @@ type Arena = {
   leaderboard: Standing[];
   feed: Entry[];
   curve: EquityPoint[];
+  news: { fetchedAt: number; items: Array<{ symbol: string; sentiment: number; headline: string; source: string; summary: string }> };
   config: {
     durableState: boolean;
     receiverConfigured: boolean;
@@ -129,20 +130,21 @@ export default function ArenaPage() {
         eyebrow="Live competition"
         title="Agent arena"
         right={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" disabled={busy} onClick={runRound}>
-              {busy ? "Running…" : "Run one round"}
-            </Button>
-            <Button variant={running ? "danger" : "primary"} onClick={() => setRunning((r) => !r)}>
-              {running ? "■ Stop" : "▶ Start"}
-            </Button>
+          <div className="flex items-center gap-2.5 rounded-[2px] border border-mint-500/30 bg-mint-500/8 px-3 py-2">
+            <Dot tone="up" pulse />
+            <div className="leading-none">
+              <div className="text-[12px] font-medium text-mint-500">Running live</div>
+              <div className="tnum mt-1 text-[10.5px] text-ash-400">
+                {data?.lastTickAt ? `round ${data.round} · ${ago(data.lastTickAt)}` : "starting…"}
+              </div>
+            </div>
           </div>
         }
       >
-        Five agents, one market, five incompatible theses. Each pays for its own
-        market data over x402 before it is allowed to act — signing a real EIP-3009
-        authorization every round — then trades a 1,000 USDG paper book against
-        live Robinhood Chain pool prices.
+        Five agents, one market, five incompatible theses. This runs continuously —
+        a round fires every minute whether anyone is watching or not. Each agent pays
+        for its own market data over x402 before it may act, reads the same headlines,
+        and trades a 1,000 USDG book against live Robinhood Chain prices.
       </PageHeader>
 
       <PageBody>
@@ -188,10 +190,8 @@ export default function ArenaPage() {
         {data ? (
           <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[2px] border border-ink-700 bg-ink-900 px-4 py-2.5">
             <span className="flex items-center gap-2">
-              <Dot tone={running ? "up" : "idle"} pulse={running} />
-              <span className="text-[12px] text-ash-200">
-                {running ? `Live · round every ${TICK_MS / 1000}s` : "Paused"}
-              </span>
+              <Dot tone="up" pulse />
+              <span className="text-[12px] text-ash-200">Round every 60s, around the clock</span>
             </span>
             <Meta label="Round" value={String(data.round)} />
             <Meta label="Last" value={ago(data.lastTickAt)} />
@@ -231,6 +231,53 @@ export default function ArenaPage() {
                 />
               ))}
         </div>
+
+        {data?.news?.items?.length ? (
+          <Panel className="mb-4">
+            <PanelHeader
+              title="The tape everyone is reading"
+              hint="Live headlines. Every agent sees these — they just disagree about what they mean."
+              right={
+                <Badge tone="neutral">{ago(data.news.fetchedAt)}</Badge>
+              }
+            />
+            <div className="divide-y divide-ink-800">
+              {data.news.items.map((n) => {
+                const tone =
+                  n.sentiment >= 0.2 ? "up" : n.sentiment <= -0.2 ? "down" : "neutral";
+                const label =
+                  n.sentiment >= 0.2 ? "bullish" : n.sentiment <= -0.2 ? "bearish" : "neutral";
+                return (
+                  <div key={n.symbol} className="flex flex-wrap items-start gap-x-3 gap-y-1.5 px-4 py-3">
+                    <span className="tnum w-12 shrink-0 text-[13px] font-medium text-ash-100">
+                      {n.symbol}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] leading-snug text-ash-200">{n.headline}</div>
+                      <div className="mt-1 text-[11px] leading-snug text-ash-400">{n.summary}</div>
+                      <div className="mt-1 font-mono text-[10px] text-ash-500">{n.source}</div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge tone={tone as "up" | "down" | "neutral"}>{label}</Badge>
+                      <span
+                        className={`tnum text-[11px] ${
+                          n.sentiment > 0 ? "text-mint-500" : n.sentiment < 0 ? "text-rose-500" : "text-ash-400"
+                        }`}
+                      >
+                        {n.sentiment >= 0 ? "+" : ""}
+                        {n.sentiment.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-ink-700 px-4 py-2.5 text-[10.5px] leading-snug text-ash-400">
+              Each agent weights the news differently — Momo leans into a catalyst, Vega fades the
+              same story. A headline that contradicts a signal strongly enough cancels the trade.
+            </div>
+          </Panel>
+        ) : null}
 
         {data && data.curve?.length > 1 ? (
           <Panel className="mb-4">

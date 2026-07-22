@@ -25,6 +25,9 @@ export type MarketView = {
   price: number;
   depthUsdg: number;
   candles: Candle[];
+  /** -1..+1 from real headlines. 0 when there is no news, or it is genuinely mixed. */
+  sentiment: number;
+  headline: string | null;
 };
 
 export type AgentDef = {
@@ -52,6 +55,16 @@ export type AgentDef = {
    */
   takeProfitMult: number;
   stopLossMult: number;
+  /**
+   * How this agent reacts to the news, from -1 to +1.
+   *
+   * Every agent reads the same headlines; what differs is what they do with
+   * them. A trend follower leans into a catalyst, a mean-reverter fades it, and
+   * a liquidity trader mostly doesn't care. Making this a weight rather than a
+   * sixth "news agent" keeps the disagreement where it belongs — in how the
+   * same information is interpreted.
+   */
+  newsWeight: number;
   decide: (view: MarketView, holding: boolean) => Decision;
 };
 
@@ -70,6 +83,7 @@ export const AGENTS: AgentDef[] = [
     aggression: 0.35,
     takeProfitMult: 3.0,
     stopLossMult: 1.6,
+    newsWeight: 0.8,
     decide: ({ candles }, holding) => {
       const fast = sma(candles, 4);
       const slow = sma(candles, 12);
@@ -115,6 +129,7 @@ export const AGENTS: AgentDef[] = [
     aggression: 0.3,
     takeProfitMult: 2.2,
     stopLossMult: 2.2,
+    newsWeight: -0.6,
     decide: ({ candles }, holding) => {
       if (candles.length < 6)
         return { action: "hold", conviction: 0, rationale: "range undefined", readout: {} };
@@ -155,6 +170,7 @@ export const AGENTS: AgentDef[] = [
     aggression: 0.5,
     takeProfitMult: 4.5,
     stopLossMult: 1.3,
+    newsWeight: 0.5,
     decide: ({ candles }, holding) => {
       if (candles.length < 8)
         return { action: "hold", conviction: 0, rationale: "no range established", readout: {} };
@@ -202,6 +218,7 @@ export const AGENTS: AgentDef[] = [
     aggression: 0.4,
     takeProfitMult: 2.6,
     stopLossMult: 1.9,
+    newsWeight: 0.15,
     decide: ({ depthUsdg, candles }, holding) => {
       const drift = changePct(candles);
       const readout = { depthUsdg, driftPct: drift };
@@ -246,6 +263,7 @@ export const AGENTS: AgentDef[] = [
     aggression: 0.6,
     takeProfitMult: 5.5,
     stopLossMult: 2.6,
+    newsWeight: 0.45,
     decide: ({ candles }, holding) => {
       const vol = volatilityPct(candles);
       const drift = changePct(candles);

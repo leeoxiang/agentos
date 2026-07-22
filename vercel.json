@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/arena/tick",
-      "schedule": "*/2 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }

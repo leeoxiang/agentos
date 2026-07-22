@@ -17,6 +17,7 @@ import { TRANSFER_WITH_AUTHORIZATION_TYPES, X402_VERSION, type PaymentPayload } 
 import { AGENTS, type Decision, type MarketView } from "./agents";
 import { SIM_PATH_LEN, seedSimPath, simCandles, stepSim, type TapeMode } from "./tape";
 import { agentAccount } from "./wallets";
+import { getNews, headlineFor, sentimentFor, type NewsSnapshot } from "./news";
 import {
   equity,
   loadState,
@@ -94,7 +95,7 @@ type Snapshot = MarketView & { fee: number; volumeUsdg: number; swaps: number };
  * Pull one round's market data: spot, depth, and a price series rebuilt from
  * actual fills. Tickers without a pool are dropped rather than faked.
  */
-async function snapshotMarket(symbols: string[]): Promise<Snapshot[]> {
+async function snapshotMarket(symbols: string[], news: NewsSnapshot): Promise<Snapshot[]> {
   const resolved = await Promise.all(
     symbols.map(async (symbol) => {
       try {
@@ -124,6 +125,8 @@ async function snapshotMarket(symbols: string[]): Promise<Snapshot[]> {
       fee: pool.fee,
       volumeUsdg: act?.volumeUsdg ?? 0,
       swaps: act?.swaps ?? 0,
+      sentiment: sentimentFor(news, symbol),
+      headline: headlineFor(news, symbol)?.headline ?? null,
     } satisfies Snapshot;
   });
 }
@@ -231,6 +234,49 @@ function riskBands(def: (typeof AGENTS)[number], snap: Snapshot) {
   };
 }
 
+/**
+ * Fold the news into a price-derived decision.
+ *
+ * The strategies stay pure — they read price, depth and volatility, and nothing
+ * else. News is applied here, uniformly, so every agent sees the same headline
+ * and only their `newsWeight` differs. That keeps the disagreement interpretive
+ * rather than mechanical: Momo leans into a catalyst at +0.8 while Vega fades
+ * the same story at -0.6.
+ *
+ * A strong enough contradiction blocks the trade outright. Sizing up on a signal
+ * the news actively argues against is the failure mode worth designing out.
+ */
+function applyNews(
+  decision: Decision,
+  snap: Snapshot,
+  def: (typeof AGENTS)[number]
+): Decision {
+  if (decision.action === "hold" || !snap.headline || snap.sentiment === 0) return decision;
+
+  // Positive when the news agrees with what this agent wants to do.
+  const agreement =
+    decision.action === "buy" ? snap.sentiment * def.newsWeight : -snap.sentiment * def.newsWeight;
+
+  if (agreement < -0.45)
+    return {
+      action: "hold",
+      conviction: 0,
+      rationale: `${decision.rationale} — but the news says otherwise, standing down`,
+      readout: { ...decision.readout, sentiment: snap.sentiment, agreement },
+    };
+
+  const scaled = Math.max(0.05, Math.min(1, decision.conviction * (1 + agreement * 0.6)));
+  return {
+    ...decision,
+    conviction: scaled,
+    rationale:
+      Math.abs(agreement) > 0.15
+        ? `${decision.rationale} — news ${agreement > 0 ? "backs it" : "cuts against it"}`
+        : decision.rationale,
+    readout: { ...decision.readout, sentiment: snap.sentiment, agreement },
+  };
+}
+
 /** Apply a decision to the agent's paper book, priced off the real pool. */
 function execute(
   book: ArenaState["books"][string],
@@ -302,7 +348,8 @@ const THOUGHT_SCHEMA = {
  * The strategies decide; the model only narrates what already happened.
  */
 async function generateThoughts(
-  rows: Array<{ agentId: string; symbol: string; decision: Decision; price: number; paid: X402Receipt }>
+  rows: Array<{ agentId: string; symbol: string; decision: Decision; price: number; paid: X402Receipt }>,
+  news: NewsSnapshot
 ): Promise<Record<string, string>> {
   if (!process.env.ANTHROPIC_API_KEY || !rows.length) return {};
 
@@ -394,7 +441,10 @@ export async function tick(origin: string): Promise<TickResult> {
   state.round += 1;
 
   const universe = await resolveUniverse();
-  const live = await snapshotMarket(universe);
+  // One fetch per round, shared by every agent and heavily cached — the whole
+  // point is that they all react to the *same* headlines.
+  const news = await getNews(universe);
+  const live = await snapshotMarket(universe, news);
 
   if (!live.length) {
     state.lastTickAt = Date.now();
@@ -470,7 +520,7 @@ export async function tick(origin: string): Promise<TickResult> {
           return { def, paid, snap: held, decision: exit, fill };
         }
 
-        const exit = def.decide(held, true);
+        const exit = applyNews(def.decide(held, true), held, def);
         if (exit.action === "sell") {
           const fill = execute(book, exit, held, def.aggression);
           return { def, paid, snap: held, decision: exit, fill };
@@ -483,7 +533,7 @@ export async function tick(origin: string): Promise<TickResult> {
       let best: { snap: Snapshot; decision: Decision } | null = null;
       for (const snap of snaps) {
         const holding = book.position?.symbol === snap.symbol;
-        const decision = def.decide(snap, holding);
+        const decision = applyNews(def.decide(snap, holding), snap, def);
         if (decision.action === "hold") continue;
         if (decision.action === "buy" && book.position) continue; // one position at a time
         if (!best || decision.conviction > best.decision.conviction) best = { snap, decision };
@@ -497,7 +547,11 @@ export async function tick(origin: string): Promise<TickResult> {
           def,
           paid,
           snap: focus,
-          decision: def.decide(focus, book.position?.symbol === focus.symbol),
+          decision: applyNews(
+            def.decide(focus, book.position?.symbol === focus.symbol),
+            focus,
+            def
+          ),
           fill: { qty: 0, notional: 0, realized: 0 },
         };
       }
@@ -507,15 +561,25 @@ export async function tick(origin: string): Promise<TickResult> {
     })
   );
 
-  const thoughts = await generateThoughts(
-    staged.map((s) => ({
+  // Commentary is the most expensive part of a round. Rounds where nobody
+  // traded and the headlines haven't changed produce near-identical text, so
+  // skip the model unless something actually happened or it's a periodic
+  // refresh — at one round a minute the cost difference is the whole bill.
+  const somethingHappened = staged.some((s) => s.decision.action !== "hold");
+  const periodicRefresh = state.round % 5 === 0;
+
+  const thoughts = somethingHappened || periodicRefresh
+    ? await generateThoughts(
+        staged.map((s) => ({
       agentId: s.def.id,
       symbol: s.snap.symbol,
       decision: s.decision,
       price: s.snap.price,
-      paid: s.paid,
-    }))
-  );
+          paid: s.paid,
+        })),
+        news
+      )
+    : {};
 
   const t = Date.now();
   const entries: FeedEntry[] = staged.map((s, i) => ({
@@ -565,7 +629,9 @@ export async function markPositions(state: ArenaState): Promise<Record<string, n
     ),
   ];
   if (!symbols.length) return {};
-  const snaps = await snapshotMarket(symbols);
+  // Marking to market only needs prices — skip the news fetch entirely rather
+  // than paying for a web search to compute a number that ignores it.
+  const snaps = await snapshotMarket(symbols, { fetchedAt: 0, items: [] });
   return Object.fromEntries(snaps.map((s) => [s.symbol, s.price]));
 }
 

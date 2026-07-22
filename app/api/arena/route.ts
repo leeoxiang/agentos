@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { AGENTS } from "@/lib/arena/agents";
 import { equity, markPositions, resolveUniverse, universeVolumes } from "@/lib/arena/engine";
 import { loadState, resetState, saveState, STARTING_BANKROLL } from "@/lib/arena/store";
+import { getNews } from "@/lib/arena/news";
 import { agentAddresses, usingDefaultSeed } from "@/lib/arena/wallets";
 import { isDurable } from "@/lib/kv";
 import { facilitatorAccount } from "@/lib/x402/facilitator";
@@ -14,6 +15,9 @@ export async function GET() {
   const state = await loadState();
   const marks = await markPositions(state);
   const addresses = agentAddresses();
+  const universe = await resolveUniverse();
+  // Cached hard, so this is a read of whatever the last round fetched.
+  const news = await getNews(universe);
 
   const leaderboard = AGENTS.map((def) => {
     const book = state.books[def.id];
@@ -53,8 +57,9 @@ export async function GET() {
     tape: state.tape,
     flatRounds: state.flatRounds,
     startingBankroll: STARTING_BANKROLL,
-    universe: await resolveUniverse(),
+    universe,
     universeVolumes: universeVolumes(),
+    news,
     leaderboard,
     feed: state.feed.slice(0, 60),
     curve: state.curve.slice(-120),
