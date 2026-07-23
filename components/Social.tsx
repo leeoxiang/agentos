@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SOCIAL, TOKEN, hasContract } from "@/lib/brand";
+import { SOCIAL, TOKEN, buyUrl, hasContract } from "@/lib/brand";
 
 /** X / GitHub / npm, as flat monochrome glyphs that don't compete with the brand orange. */
 export function SocialRow({ compact = false }: { compact?: boolean }) {
@@ -76,7 +76,7 @@ export function TokenCard() {
   return (
     <div className="rounded-[2px] border border-flame-500/30 bg-flame-500/[0.06] p-2.5">
       <a
-        href={TOKEN.buyUrl}
+        href={buyUrl()}
         target="_blank"
         rel="noreferrer"
         className="flex h-8 w-full items-center justify-center gap-1.5 rounded-[2px] bg-flame-500 text-[12px] font-semibold text-ink-950 transition-colors hover:bg-flame-400"
